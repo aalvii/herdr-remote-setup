@@ -1,0 +1,73 @@
+name: Bug report
+description: A setup step failed or behaved unexpectedly
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste a connection code, a `tskey-...` value, a private key, or an
+        enrollment token. Replace them with `<redacted>`. Report a security
+        problem through SECURITY.md, not here.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The contents of VERSION
+      placeholder: 3.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Role
+      options:
+        - Host
+        - Client
+        - App only
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: exit
+    attributes:
+      label: Exit code
+      description: From the script, the app, or the log
+      placeholder: "4"
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Ran ...
+        2. Saw ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines (redacted)
+      description: Host uses ~/.local/state/herdr-setup/setup.log. Clients use the HerdrSetup log folder.
+      render: text
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed all secrets from this report.
+          required: true

@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Public scan
+        run: python3 tools/check-public.py
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile host/enroll.py tools/check-public.py
+
+      - name: Shell syntax
+        run: |
+          for f in $(git ls-files '*.sh' '*.command'); do
+            bash -n "$f"
+          done
+
+      - name: ShellCheck errors
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck -S error --shell=bash $(git ls-files '*.sh' '*.command')
+
+      - name: Self-tests
+        run: |
+          bash host/setup.sh --version
+          bash host/provision.sh --version
+          bash app/herdr-setup.sh --self-test
+          bash client/setup-macos.sh --self-test
+
+      - name: Desktop entries
+        run: |
+          if ! command -v desktop-file-validate >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y desktop-file-utils
+          fi
+          ./host/install-desktop.sh
+          desktop-file-validate "$HOME/.local/share/applications/herdr-setup-app.desktop"
+          desktop-file-validate "$HOME/.local/share/applications/herdr-remote-setup.desktop"
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify package
+        shell: powershell
+        run: .\tools\verify-package.ps1
+
+      - name: Client self-test
+        shell: powershell
+        run: .\client\setup.ps1 -SelfTest
+
+      - name: App self-test
+        shell: powershell
+        run: .\app\herdr-setup.ps1 -SelfTest
+
+      - name: App launcher self-test
+        shell: cmd
+        run: app\Herdr-Setup.cmd -SelfTest
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash version
+        run: bash --version | head -1
+
+      - name: macOS client self-test
+        run: bash client/setup-macos.sh --self-test
+
+      - name: App self-test
+        run: bash app/herdr-setup.sh --self-test
+
+      - name: Shell syntax
+        run: |
+          for f in $(git ls-files '*.sh' '*.command'); do
+            bash -n "$f"
+          done
+
+      - name: LaunchAgent plist
+        run: bash client/install-watchdog-macos.sh --dry-run

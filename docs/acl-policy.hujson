@@ -1,0 +1,67 @@
+{
+  // =====================================================================
+  // Herdr Remote Setup - example tailnet policy (HuJSON)
+  //
+  // Paste into https://login.tailscale.com/admin/acls and edit the values
+  // in angle brackets. This file is an example, not a required deployment.
+  //
+  // IMPORTANT: herdr's remote bridge needs OpenSSH with a key. Do not use
+  // Tailscale SSH for herdr. The ssh block below exists only for human
+  // logins. Keep the herdr host on OpenSSH and leave RunSSH false.
+  // =====================================================================
+
+  "tagOwners": {
+    "tag:operator":   ["autogroup:admin"],
+    "tag:herdr-host": ["autogroup:admin"],
+    "tag:client":     ["autogroup:admin"]
+  },
+
+  // Single-owner tailnet: every member may reach every device.
+  // Replace with the tag-based grants below when other people join.
+  "grants": [
+    {
+      "src": ["autogroup:member"],
+      "dst": ["*"],
+      "ip": ["*"]
+    }
+  ],
+
+  // =====================================================================
+  // OPTIONAL - human SSH only
+  //
+  // action "accept" strips the browser confirmation. Use it only with a
+  // narrow src/dst/users tuple. "autogroup:self" limits SSH to the
+  // member's own devices.
+  //
+  // If the host must also serve herdr, do not put Tailscale SSH on port
+  // 22. Move the system sshd to another port and point herdr at it with
+  // ssh://user@host:port. See docs/ARCHITECTURE.md.
+  // =====================================================================
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["autogroup:member"],
+      "dst": ["autogroup:self"],
+      "users": ["autogroup:nonroot", "root"]
+    }
+  ]
+
+  // =====================================================================
+  // MULTI-USER PHASE - use these grants instead of the single-owner one.
+  //
+  // 1) Tag machines:
+  //      sudo tailscale up --advertise-tags=tag:operator
+  //      sudo tailscale up --advertise-tags=tag:herdr-host
+  //    Tag client machines at join time with tag:client.
+  //
+  // 2) Replace "grants" with:
+  //      [
+  //        { "src": ["tag:operator"], "dst": ["*"], "ip": ["*"] },
+  //        { "src": ["tag:client"], "dst": ["tag:herdr-host"],
+  //          "ip": ["tcp:22"] }
+  //      ]
+  //
+  // 3) Keep clients out of every other destination. A client with no
+  //    grant can reach only the herdr host, over SSH.
+  // =====================================================================
+}

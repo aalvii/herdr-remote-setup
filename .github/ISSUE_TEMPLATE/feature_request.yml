@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a change to the setup flow or the app
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what blocks it?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Host setup
+        - Client setup
+        - App
+        - macOS
+        - Windows
+        - Linux
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change? Keep the source-of-truth rule in CONTRIBUTING.md in mind.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Product constraints
+      description: These are fixed unless the request includes a strong reason.
+      options:
+        - label: The request keeps OpenSSH key transport for herdr.
+        - label: The request keeps the detached server start.
+        - label: The request keeps enrollment on port 0.

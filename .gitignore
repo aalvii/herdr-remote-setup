@@ -1,0 +1,23 @@
+# Local working material (never published)
+.audit/
+*.log
+*.tmp
+
+# Private material kept outside the public tree
+/extras/
+/legacy/
+/docs/HANDOFF.md
+
+# Release archives and local build output
+/herdr-remote-setup-v*.zip
+/dist/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
