@@ -152,8 +152,11 @@ last event == failure (revocation / health check) and log idle > stale minutes
 
 A TUI needs an interactive console. On Windows,
 `Start-Process` and `cmd /c start` from a non-console context exit immediately;
-a scheduled task with `LogonType Interactive` works. On macOS the watchdog is a
-LaunchAgent and reopens Terminal through `osascript`.
+a scheduled task with `LogonType Interactive` works. The task action is
+`wscript.exe` with `client/watchdog-hidden.vbs`, which starts
+`watchdog.ps1 -Quiet` with a hidden window. The two-minute check no longer
+flashes a console. On macOS the watchdog is a LaunchAgent and reopens Terminal
+through `osascript`.
 
 The macOS client log path was not observed on a real Mac. The watchdog probes
 three likely paths and accepts `HERDR_CLIENT_LOG`. If none exists it exits 2 and

@@ -15,7 +15,10 @@ $ErrorActionPreference = "Stop"
 
 $TaskName = "HerdrWatchdog"
 $Script = Join-Path $PSScriptRoot "watchdog.ps1"
-$PowerShellExe = (Get-Command powershell.exe).Source
+# wscript.exe has no console window, so the 2-minute task does not flash a
+# terminal window. It starts powershell.exe with a hidden window.
+$Vbs = Join-Path $PSScriptRoot "watchdog-hidden.vbs"
+$WscriptExe = Join-Path $env:SystemRoot "System32\wscript.exe"
 
 if ($Uninstall) {
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
@@ -31,9 +34,11 @@ if ($Uninstall) {
 }
 
 if (-not (Test-Path $Script)) { Write-Output "watchdog.ps1 not found"; exit 2 }
+if (-not (Test-Path $Vbs)) { Write-Output "watchdog-hidden.vbs not found"; exit 2 }
+if (-not (Test-Path $WscriptExe)) { Write-Output "wscript.exe not found"; exit 2 }
 
-$action = New-ScheduledTaskAction -Execute $PowerShellExe `
-    -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Script`" -Quiet"
+$action = New-ScheduledTaskAction -Execute $WscriptExe `
+    -Argument "`"$Vbs`""
 
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) `
@@ -45,6 +50,6 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Principal $principal -Settings $settings -Force | Out-Null
 
-Write-Output "Installed task $TaskName (every $IntervalMinutes min, interactive session)"
+Write-Output "Installed task $TaskName (every $IntervalMinutes min, interactive session, hidden via wscript)"
 Write-Output "Log: $env:LOCALAPPDATA\HerdrSetup\logs\watchdog.log"
 Write-Output "Test: powershell -File `"$Script`" -DryRun"

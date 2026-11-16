@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.1.3 - 2026-11-15
+
+Hide the Windows watchdog console window.
+
+### Added
+
+- `client/watchdog-hidden.vbs`: starts `watchdog.ps1 -Quiet` through
+  `wscript.exe` with a hidden window.
+
+### Changed
+
+- `client/install-watchdog.ps1` registers the `HerdrWatchdog` task with
+  `wscript.exe "<path>\watchdog-hidden.vbs"` instead of a visible PowerShell
+  process. The two-minute check no longer flashes a console window.
+- `VERSION` is 3.1.3.
+
+### Verified
+
+- `cscript //nologo client\watchdog-hidden.vbs` exits 0 and appends a line to
+  `watchdog.log`.
+- The installed task action is
+  `C:\WINDOWS\System32\wscript.exe "…\client\watchdog-hidden.vbs"`.
+- `Start-ScheduledTask -TaskName HerdrWatchdog` appends a watchdog log line.
+
+---
+
 ## 3.1.2 - 2026-11-15
 
 Add the two-machine runbook.
