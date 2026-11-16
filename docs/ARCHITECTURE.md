@@ -15,7 +15,7 @@
 +---------------------------------------------------+
 ```
 
-Layer 1 is mandatory for this VM: it has no public address.
+Layer 1 is mandatory for a host without a public address.
 
 ## Platforms
 
@@ -283,7 +283,7 @@ Client (macOS):
 
 ## Deliberate limits
 
-- No password bootstrap. The reference host disables password auth.
+- No password bootstrap. The recommended setup disables password auth.
 - No silent elevation on Windows.
 - No automatic ACL editing. The tailnet policy stays operator-owned.
 - `ts-ssh` depends on the operator keeping node tags correct; the autostart unit

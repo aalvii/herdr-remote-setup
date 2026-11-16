@@ -165,7 +165,7 @@ Both need `zenity`.
 
 ### Keep the node correct after a reboot
 
-If the VM loses `/var/lib/tailscale`, the node re-registers with a new node key
+If the host loses `/var/lib/tailscale`, the node re-registers with a new node key
 and a new device ID. The tag and `--ssh` are not restored automatically, so ACL
 rules stop matching and Tailscale SSH breaks.
 

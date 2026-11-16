@@ -2,7 +2,7 @@
 # Install a systemd unit that keeps the Tailscale node usable after a reboot
 # or a re-registration.
 #
-# Why: if the VM loses /var/lib/tailscale (image rebuild, ephemeral disk),
+# Why: if the host loses /var/lib/tailscale (image rebuild, ephemeral disk),
 # the node re-registers with a new node key and a new device ID. Without
 # re-applying the tag and --ssh, ACL rules stop matching and Tailscale SSH
 # stops working. This unit re-asserts them at boot.
