@@ -321,6 +321,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 ├── VERSION
 ├── MANIFEST.sha256
 ├── LICENSE
+├── THIRD-PARTY.md
 ├── SECURITY.md
 ├── CONTRIBUTING.md
 ├── app/
@@ -349,7 +350,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 │   ├── setup-macos.sh          # macOS client flow
 │   ├── watchdog-macos.sh       # macOS watchdog
 │   ├── install-watchdog-macos.sh  # LaunchAgent installer
-│   └── assets/herdr-windows-x86_64.zip
+│   └── assets/herdr-windows-x86_64.zip  # Apache-2.0, see THIRD-PARTY.md
 ├── tools/
 │   ├── verify-package.ps1
 │   ├── make-manifest.ps1
@@ -417,7 +418,10 @@ bash app/herdr-setup.sh --self-test
 
 ## 10. Open source
 
-- **License:** MIT. See `LICENSE`.
+- **License:** MIT for this project. The bundled Herdr archive is Apache-2.0.
+  See `THIRD-PARTY.md`.
+- **Not affiliated:** this project is not affiliated with or endorsed by Herdr
+  or Tailscale.
 - **Contributing:** `CONTRIBUTING.md`. Run the self-tests and the public scan
   before a pull request.
 - **Security:** `SECURITY.md`. Do not open a public issue for a vulnerability.
