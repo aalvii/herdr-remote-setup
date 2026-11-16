@@ -19,7 +19,7 @@ jobs:
 
       - name: Python syntax
         run: |
-          python3 -m py_compile host/enroll.py tools/check-public.py
+          python3 -m py_compile host/enroll.py host/pair.py tools/check-public.py
 
       - name: Shell syntax
         run: |
@@ -39,6 +39,7 @@ jobs:
         run: |
           bash host/setup.sh --version
           bash host/provision.sh --version
+          bash host/pair.sh --help
           bash app/herdr-setup.sh --self-test
           bash client/setup-macos.sh --self-test
 
@@ -49,6 +50,8 @@ jobs:
             sudo apt-get install -y desktop-file-utils
           fi
           ./host/install-desktop.sh
+          desktop-file-validate host/Herdr-Provision.desktop
+          desktop-file-validate app/Herdr-Setup.desktop
           desktop-file-validate "$HOME/.local/share/applications/herdr-setup-app.desktop"
           desktop-file-validate "$HOME/.local/share/applications/herdr-remote-setup.desktop"
 
@@ -64,6 +67,14 @@ jobs:
       - name: Client self-test
         shell: powershell
         run: .\client\setup.ps1 -SelfTest
+
+      - name: Pair client self-test
+        shell: powershell
+        run: .\client\pair.ps1 -SelfTest
+
+      - name: Simple app self-test
+        shell: powershell
+        run: .\app\herdr-connect.ps1 -SelfTest
 
       - name: App self-test
         shell: powershell

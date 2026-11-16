@@ -1,8 +1,8 @@
 #!/bin/bash
 # Clickable macOS launcher. Double-click in Finder.
 #
-# A .command file opens Terminal. Keep the window open on failure so the
-# error and the manual command stay readable.
+# This is the simple share flow. The host prints a 6-digit PIN. The other
+# computer enters it. No connection code is needed.
 
 DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || dirname "$0")"
 cd "$DIR" 2>/dev/null || {
@@ -11,15 +11,14 @@ cd "$DIR" 2>/dev/null || {
   exit 1
 }
 
-chmod +x launch-provision.sh provision.sh 2>/dev/null || true
+chmod +x launch-pair.sh pair.sh 2>/dev/null || true
 
-./launch-provision.sh
+./launch-pair.sh
 RC=$?
 echo ""
 if [ "$RC" -ne 0 ]; then
-  echo "Provisioning failed (exit $RC)."
-  echo "Run: $DIR/provision.sh"
+  echo "Sharing stopped with exit $RC."
 fi
-# Keep the window open on success too: it holds the connection code.
+echo "For the old connection-code flow, run: $DIR/provision.sh"
 read -r -p "Press Enter to close" _
 exit "$RC"

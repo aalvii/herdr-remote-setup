@@ -1,5 +1,65 @@
 # Changelog
 
+## 4.0.0 - 2026-11-16
+
+Simple PIN pairing for non-IT users.
+
+### Added
+
+- `host/pair.py`: a pairing service on the host Tailscale address. It shows a
+  6-digit PIN, accepts the client SSH public key plus the PIN, appends the key,
+  and limits wrong PIN attempts. It never logs a PIN or a key.
+- `host/pair.sh`: one-command host share flow. It checks Tailscale, sshd, and
+  herdr, starts the herdr server detached, and runs the pairing service.
+- `host/launch-pair.sh`: clickable host launcher for the share flow.
+- `client/pair.ps1`: Windows client for the PIN flow. It signs in to Tailscale
+  interactively, finds the host, sends its key and PIN, tests SSH, registers the
+  machine in herdr, and installs the watchdog.
+- `app/herdr-connect.ps1` and `app/Herdr-Connect.cmd`: the simple Windows app.
+  Two actions, Connect to a computer and Share this computer. Connect scans the
+  tailnet, lists sharing computers, takes the PIN, streams the setup output, and
+  offers Open herdr.
+- `app/herdr-setup.sh`: a simple Linux and macOS menu for Share, Connect, and
+  Advanced. The previous role/OS app is now `app/herdr-setup-advanced.sh` and is
+  reachable from Advanced.
+- `Herdr-Setup.cmd` now starts the simple app. The old role/OS app remains under
+  Advanced setup.
+- `host/Herdr-Provision.desktop` and `host/Herdr-Provision.command` now start
+  the share flow. The connection-code flow is still available from
+  `host/provision.sh`.
+
+### Changed
+
+- The primary user path needs no connection code, no Tailscale auth key, and no
+  IP address. The host reads a 6-digit PIN to the client.
+- Tailscale login is interactive. The client opens the browser login when the
+  host is not visible.
+- `VERSION` is 4.0.0.
+
+### Verified
+
+- Linux host share produced a PIN and bound `100.x.y.z:18765` for the
+  test.
+- Wrong PIN returned HTTP 401. A correct PIN returned HTTP 200 and appended the
+  key.
+- A Windows client paired with a temporary key, connected over SSH, added a test
+  machine entry, and `herdr machine status` reported `reachable`.
+- The host pairing service exited after `--once`; the test key and test machine
+  entry were removed.
+- The Windows app constructed and its self-tests pass.
+- The shell dispatcher self-test and the Advanced flow still pass.
+
+### Limits
+
+- The Windows host role is not shipped. Share runs on Linux and macOS.
+- The PIN client is Windows-only in 4.0.0. The macOS client uses the Advanced
+  connection-code flow. A macOS PIN client is a follow-up.
+- The pairing service uses fixed port 8765 and plain HTTP on the tailnet. The
+  tailnet (WireGuard) encrypts the traffic, and the PIN gates the key exchange.
+- The PIN is a secret. Do not share it outside the two machines.
+
+---
+
 ## 3.1.3 - 2026-11-15
 
 Hide the Windows watchdog console window.

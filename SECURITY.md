@@ -29,9 +29,10 @@ exposed, revoke it first.
 
 In scope:
 
+- the pairing service in `host/pair.py`, the PIN flow, and key append
 - the enrollment endpoint in `host/enroll.py`
 - credential handling in `host/` and `client/`
-- secret leakage in logs, the connection code, or the repository
+- secret leakage in logs, the PIN, the connection code, or the repository
 - the Tailscale ACL example and the access model
 - privilege or transport bypasses
 
@@ -44,6 +45,13 @@ Out of scope:
 
 ## Known limits
 
+- The simple flow uses a 6-digit PIN. It allows five wrong attempts per source
+  in five minutes, rotates after each success, and expires after 30 minutes.
+- The pairing service binds the Tailscale address only, at port 8765. It uses
+  plain HTTP inside the tailnet; WireGuard encrypts it. The PIN gates the key
+  exchange.
+- The PIN is passed to the client child process as a command-line argument. A
+  local administrator can see it in the process list while the client runs.
 - The connection code is base64, not encryption. It can contain a one-time
   Tailscale auth key and an enrollment token. Treat it as a secret.
 - The Windows app and both client CLIs pass the code to the child process as a
@@ -52,8 +60,8 @@ Out of scope:
   the code.
 - The enrollment endpoint binds `0.0.0.0` and is protected by a one-time token.
   It stops after one successful request or when the TTL expires.
-- The app does not embed a secret. It reads the code from the input field and
-  hands it to the verified client script.
+- The app does not embed a secret. It reads the PIN or code from the input field
+  and hands it to the verified client script.
 
 ## Response
 

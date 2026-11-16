@@ -1,239 +1,132 @@
 # Set up Host A and Machine B
 
-This page is the two-machine runbook. Host A runs the herdr server. Machine B
-connects to it.
+This page is the two-machine runbook. Host A runs the herdr server and shows a
+6-digit PIN. Machine B connects with that PIN.
 
-Version: see `VERSION`.
+Version: see `VERSION` (currently 4.0.0).
 
 ## Supported pairs
 
-| Host A | Machine B | Status |
-|--------|-----------|--------|
-| Linux | Windows | Fully verified |
-| Linux | macOS | macOS client not runtime verified |
-| macOS | Windows | macOS host not runtime verified |
-| macOS | macOS | Both macOS paths not runtime verified |
+| Host A | Machine B | PIN flow | Advanced code flow |
+|--------|-----------|:---:|:---:|
+| Linux | Windows | yes | yes |
+| Linux | macOS | no, use Advanced | yes |
+| macOS | Windows | yes | yes |
+| macOS | macOS | no, use Advanced | yes |
 
 Host A cannot be Windows. Machine B cannot be Linux in this package.
 
 ## Before you start
 
-1. Access to the Tailscale admin console at https://login.tailscale.com/admin.
-2. Host A must already be in the tailnet. Run `tailscale status` on A and check
-   that it is online.
-3. Create a fresh auth key for B in the console. Settings, Keys, Generate auth
-   key. Single use, one hour, pre-approved, not ephemeral. Copy the
-   `tskey-auth-...` value.
-4. Use a new key for each client. A single-use key cannot onboard a second
-   machine.
-5. Copy the whole package to A and B. If you copy only `client`, the app and the
-   `VERSION` file are missing.
+1. A Tailscale account. Both machines must join the same tailnet.
+2. Host A: Linux or macOS, sudo or admin rights, sshd, and python3.
+   On macOS: `xcode-select --install`.
+3. Machine B: Windows 10 or 11.
+4. Copy the whole package to both machines.
+5. No Tailscale auth key is needed for the PIN flow.
+6. On Host A, if Tailscale is not connected yet, run `sudo tailscale up` once.
 
-Host A needs sudo or admin rights. Machine B needs Administrator on Windows for
-the Tailscale install.
-
-## Step 1: Host A
-
-Open a terminal in the package root on A.
-
-### Clickable launcher
+## Step 1: Share Host A
 
 Linux:
 
-- `host/Herdr-Provision.desktop` runs the host flow.
-- `app/Herdr-Setup.desktop` opens the app. Choose Host and Linux.
+- double-click `host/Herdr-Provision.desktop`; or
+- run:
+
+```bash
+cd host
+bash pair.sh
+```
 
 macOS:
 
-- `host/Herdr-Provision.command` runs the host flow.
-- `app/Herdr-Setup.command` opens the app. Choose Host and macOS.
+- double-click `host/Herdr-Provision.command`; or
+- run `bash host/pair.sh`.
 
-If a file manager marks the Linux file untrusted, right-click it and choose
-**Allow this file to be executed**.
+The host prints:
 
-### Terminal
+```
+Herdr Share v4.0.0
+  Computer : <hostname>
+  User     : <login user>
+  Address  : 100.x.y.z:8765
+
+  PIN      : 123456
+```
+
+Keep the window open. The PIN is valid for 30 minutes and rotates after each
+successful connection. Ctrl+C stops sharing.
+
+The host flow:
+
+1. Checks Tailscale and prints an error if it is not connected.
+2. Checks or starts sshd.
+3. Installs herdr if missing and starts the herdr server detached.
+4. Starts the pairing service on the Tailscale address at port 8765.
+5. Prints the PIN.
+
+It never enables Tailscale SSH.
+
+### macOS host
+
+If the host says SSH is off, enable System Settings > General > Sharing >
+Remote Login. The script tries `systemsetup -setremotelogin on` first.
+
+### Linux host
+
+If the host says sshd is not running, start it:
 
 ```bash
-cd host
-./provision.sh --authkey tskey-auth-xxxxxxxxxxxx --save-key
+sudo systemctl start sshd
 ```
 
-If a zip copy lost the execute bit:
+## Step 2: Connect Machine B
 
-```bash
-bash provision.sh --authkey tskey-auth-xxxxxxxxxxxx --save-key
-```
+1. Double-click `app\Herdr-Setup.cmd`.
+2. Click **Connect to a computer**.
+3. Pick Host A from the list, or type its Tailscale IP.
+4. Enter the 6-digit PIN from Host A.
+5. Click **Connect**.
+6. When it says Connected, click **Open herdr**.
 
-Later runs on the same host need no key argument:
+The app signs in to Tailscale if needed, installs herdr if missing, sends the
+public key and PIN, tests SSH, adds Host A to herdr, and installs the watchdog.
 
-```bash
-./provision.sh
-```
+If the list is empty, click **Refresh**. Both machines must be online in the same
+tailnet, and the host sharing window must still be open.
 
-`--save-key` stores the key at `/etc/herdr-setup/authkey` with mode 600. That
-helps when you rerun the same flow. It does not make a spent single-use key
-valid for a new client.
+### macOS client
 
-### macOS host prerequisites
+The PIN client is Windows-only in 4.0.0. On macOS, use the Advanced connection
+code flow in section 6.
 
-```bash
-xcode-select --install
-sudo systemsetup -setremotelogin on
-```
+### Linux client
 
-You can also use System Settings, General, Sharing, Remote Login. The script
-tries `systemsetup` and exits 4 if Remote Login stays off.
-
-### Host output
-
-The flow checks or installs Tailscale, starts sshd, installs herdr, starts the
-herdr server detached, starts the one-time enrollment endpoint, and prints a
-base64 connection code.
-
-Expected details:
-
-```
-mode      : key
-host      : <user>@<hostname>
-dns       : <hostname>.<tailnet>.ts.net
-addresses : 100.x.y.z,...
-auth key  : included (single use, sensitive)
-enroll    : port <PORT>, one-time token in the code
-```
-
-The code is saved at `~/.local/state/herdr-setup/connection-code.txt` with mode
-600. It is valid for about one hour.
-
-### Confirm the host state
-
-```bash
-tailscale debug prefs | grep RunSSH                 # must be false
-herdr status --json | grep detached_server_daemon   # must be true
-pgrep -x sshd
-tailscale ip -4
-```
-
-If `RunSSH` is true, disable Tailscale SSH. It breaks herdr:
-
-```bash
-sudo tailscale set --ssh=false
-```
-
-### Host without an auth key
-
-When both machines are already in the tailnet, you can issue a code without a
-key. The client skips the Tailscale join when the host is already visible:
-
-```bash
-cd host
-./setup.sh --mode key --enroll --enroll-ttl 3600
-```
-
-This is the lower-level entry. It does not save the code to the state file.
-
-## Step 2: Machine B
-
-Send the code to B over a private channel. It contains an auth key and an
-enrollment token. Treat it as a password.
-
-### B is Windows
-
-1. Copy the package to B.
-2. Double-click `app\Herdr-Setup.cmd`.
-3. Choose Client and Windows.
-4. Paste the code and click Run.
-5. Approve the administrator restart if the app asks.
-
-Direct client GUI:
-
-1. Right-click `client\setup.cmd`.
-2. Choose **Run as administrator**.
-3. Paste the code.
-4. Click Start setup.
-
-Command line:
-
-```powershell
-cd client
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -ConnectionCode "<code>"
-```
-
-Windows needs the OpenSSH Client feature. If `ssh -V` fails, add it from
-Settings, Apps, Optional features.
-
-### B is macOS
-
-1. Copy the package to B.
-2. Double-click `app/Herdr-Setup.command`.
-3. Choose Client and macOS.
-4. Paste the code.
-
-Or:
-
-```bash
-cd client
-bash setup-macos.sh --code "<code>"
-```
-
-macOS needs the command line tools for `ssh-keygen` and `python3`:
-
-```bash
-xcode-select --install
-```
-
-### What B does
-
-1. Decodes the v2 connection code.
-2. Installs Tailscale if needed and joins the tailnet with the embedded key.
-3. Waits until Host A is visible.
-4. Installs herdr locally.
-5. Creates `~/.ssh/id_ed25519` if it does not exist.
-6. Tries SSH to A. If the key is not authorized, it posts the public key to the
-   enrollment endpoint on A and retries.
-7. Registers A with `herdr machine add`.
-8. Installs the watchdog. Windows uses the `HerdrWatchdog` task. macOS uses the
-   `dev.herdr.watchdog` LaunchAgent.
-
-The output ends with:
-
-```
-Setup complete (vX.Y.Z, mode key)
-  herdr --machine <label>
-```
+The Linux client is not shipped.
 
 ## Step 3: Verify
 
 On Machine B:
 
-```bash
+```powershell
 herdr machine status
-herdr machine list
 herdr --machine <label>
 ```
 
 `herdr machine status` must print `reachable`. Then open the TUI:
 
-```bash
+```powershell
 herdr
 ```
 
 Select the machine in the sidebar. The first selection is manual because a TUI
 needs an interactive terminal.
 
-Check the watchdog.
-
-Windows:
+Check the watchdog:
 
 ```powershell
 Get-ScheduledTask -TaskName HerdrWatchdog
 powershell -File client\watchdog.ps1 -DryRun
-```
-
-macOS:
-
-```bash
-launchctl print gui/$(id -u)/dev.herdr.watchdog
-bash client/watchdog-macos.sh --dry-run
 ```
 
 Exit code 0 means healthy. Exit code 11 means the watchdog would restart a
@@ -243,35 +136,70 @@ stalled client.
 
 | Symptom | Check | Fix |
 |---------|-------|-----|
-| B shows `connecting`, then `endpoint did not acknowledge surface revocation` | `tailscale debug prefs \| grep RunSSH` on A | Must be false. Run `sudo tailscale set --ssh=false` |
-| Same, SSH works | `herdr status --json` on A | `detached_server_daemon` must be true. Run `herdr server stop`, then `setsid -f herdr server </dev/null >/dev/null 2>&1` |
-| Same, server is detached | Client retry loop | Restart only the client. Detach with Ctrl+B then Q, then run `herdr` again, or wait for the watchdog |
-| `SSH authentication failed` | The code may be expired or already used | Run `./provision.sh` on A again and send the new code |
-| `Host is not reachable in the tailnet` | `tailscale status` on both machines | Both must be online in the same tailnet. Check that the auth key is valid |
-| Enrollment endpoint unreachable | Code TTL is one hour by default | Issue a new code, or add the public key to `~/.ssh/authorized_keys` on A manually |
-| `OpenSSH client missing` on B | `ssh -V` | Install the Windows OpenSSH Client feature |
-| Exit 2, 3, 4, 5, or 6 | Read the log | 2 input or prerequisite, 3 network, 4 SSH, 5 herdr, 6 internal |
+| No computer found | Is the host sharing window open? | Start `host/pair.sh` and click Refresh |
+| No computer found | `tailscale status` on both machines | Both must be online in the same tailnet |
+| Wrong PIN | The PIN is six digits and rotates | Read the current PIN on Host A |
+| Too many attempts | Five wrong attempts in five minutes | Wait, or restart `pair.sh` |
+| Host not visible | The client is logged out of Tailscale | Complete the browser login |
+| SSH failed after pairing | `pgrep -x sshd` on Host A | Start sshd; check `~/.ssh` is 700 |
+| Port 8765 is busy | Another service owns the port | Stop it; the host prints the error |
+| Herdr shows connecting | `tailscale debug prefs \| grep RunSSH` on Host A | Must be false |
+| Herdr shows connecting | `herdr status --json` on Host A | `detached_server_daemon` must be true |
+| Herdr stalled after revocation | Known issue #3842 | Restart only the client, or wait for the watchdog |
 
 Logs:
 
-- Host A: `~/.local/state/herdr-setup/setup.log`
-- Windows B: `%LOCALAPPDATA%\HerdrSetup\logs\setup-*.log`
-- macOS B: `~/Library/Logs/HerdrSetup/setup-*.log`
+- Host A: `~/.local/state/herdr-setup/pair.log`
+- Machine B: `%LOCALAPPDATA%\HerdrSetup\logs\pair-*.log`
+
+The pairing service never logs a PIN or a key.
+
+## Advanced: connection code
+
+Use this for automation, for the macOS client in 4.0.0, or when the PIN flow is
+not available.
+
+On Host A:
+
+```bash
+cd host
+bash provision.sh --authkey tskey-auth-xxxxxxxxxxxx --save-key
+```
+
+The host prints a base64 connection code. It contains a one-time Tailscale auth
+key and an enrollment token. Treat it as a secret.
+
+On Machine B, Windows:
+
+```powershell
+cd client
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -ConnectionCode "<code>"
+```
+
+On Machine B, macOS:
+
+```bash
+cd client
+bash setup-macos.sh --code "<code>"
+```
+
+The advanced flow is unchanged. It uses the same OpenSSH key transport, the
+enrollment endpoint, and `herdr machine add`.
 
 ## Security rules
 
-- The connection code is base64, not encryption. It contains the auth key and
-  the enrollment token.
-- The auth key is single use and short lived. Create a new one for each client.
-- Do not paste the code into a ticket, chat, or commit.
-- The enrollment endpoint accepts one successful key and then stops.
-- Revoke a client by removing its line from `~/.ssh/authorized_keys` on A, and
-  by revoking its Tailscale key or device.
-- `/etc/herdr-setup/authkey` is root-only. Do not copy it to B.
+- The PIN is a secret. Do not share it outside the two machines.
+- The pairing service binds the Tailscale address only, at port 8765. The
+  tailnet encrypts the HTTP traffic.
+- The simple flow does not create a `tskey-...` value.
+- The advanced connection code is base64, not encryption. It can carry a
+  Tailscale auth key and an enrollment token.
+- Revoke a machine by removing its key from `~/.ssh/authorized_keys` on Host A.
+- Do not post a PIN or a connection code in a ticket or chat.
 
 ## Related pages
 
 - `docs/QUICKSTART.md` is the one-page command reference.
-- `docs/ARCHITECTURE.md` explains the layers and the connection code.
+- `docs/ARCHITECTURE.md` explains the layers and the pairing protocol.
 - `docs/TROUBLESHOOTING.md` is the full failure matrix.
 - `docs/ACCESS-MODEL.md` covers tags, ACLs, onboarding, and revocation.

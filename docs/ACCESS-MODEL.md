@@ -3,6 +3,9 @@
 This page defines the three roles in a tailnet, the tag rules, the ACL shape, and
 the steps to onboard and revoke a client.
 
+The simple PIN flow in `docs/QUICKSTART.md` uses the same OpenSSH key transport
+and the same ACL model. It changes the pairing UX, not the access model.
+
 Related files:
 
 - `docs/acl-policy.hujson` is a paste-ready policy example.

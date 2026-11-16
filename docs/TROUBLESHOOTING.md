@@ -4,9 +4,77 @@ Use the exit code first, then read the log.
 
 | Exit | Log |
 |------|-----|
-| any | Client Windows `%LOCALAPPDATA%\HerdrSetup\logs\setup-*.log` |
+| any | Host `~/.local/state/herdr-setup/pair.log` (simple PIN flow) |
+| any | Host `~/.local/state/herdr-setup/setup.log` (advanced code flow) |
+| any | Client Windows `%LOCALAPPDATA%\HerdrSetup\logs\pair-*.log` or `setup-*.log` |
 | any | Client macOS `~/Library/Logs/HerdrSetup/setup-*.log` |
-| any | Host `~/.local/state/herdr-setup/setup.log` |
+
+---
+
+## Simple PIN flow
+
+### The Windows app finds no computer
+
+1. Is the host sharing window still open? It must show a PIN.
+2. Are both machines on the same tailnet? Run `tailscale status` on both.
+3. Is the host listening on port 8765? On the host:
+
+   ```bash
+   ss -ltn | grep 8765
+   ```
+
+4. Is the host's Tailscale address up?
+
+   ```bash
+   tailscale ip -4
+   ```
+
+The client scans each tailnet peer at port 8765. A host that is offline, logged
+out, or not sharing is skipped.
+
+### Wrong PIN or too many attempts
+
+The PIN is six digits and rotates after each successful connection. Five wrong
+attempts from one source in five minutes returns HTTP 429. Wait five minutes or
+restart `host/pair.sh` for a new PIN.
+
+### The host is not visible in Tailscale
+
+The Windows app opens the Tailscale login in a browser when the host is not
+visible. Sign in with the same account as Host A. Then click Connect again.
+
+### SSH failed after the PIN was accepted
+
+The key was appended, but sshd refused the session. On the host:
+
+```bash
+pgrep -x sshd
+ls -ld ~ ~/.ssh ~/.ssh/authorized_keys
+```
+
+`~/.ssh` must be 700, `authorized_keys` 600, and `$HOME` must not be group or
+other writable. On macOS run `chmod go-w ~`.
+
+### Port 8765 is busy
+
+Another service owns the port. Stop it, or start the host on another port:
+
+```bash
+bash host/pair.sh --port 18765
+```
+
+The Windows app uses 8765. If you change the host port, the app cannot discover
+it; use `client\pair.ps1 -HostName <ip> -Port 18765 -Pin <pin>`.
+
+### Share this computer is disabled on Windows
+
+The Windows host role is not shipped. Run the share flow on the Linux or macOS
+host, then connect from Windows.
+
+### The macOS client has no PIN option
+
+The PIN client is Windows-only in 4.0.0. On macOS, use the Advanced connection
+code flow in `docs/SETUP-A-AND-B.md`.
 
 ---
 

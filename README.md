@@ -8,44 +8,53 @@ Version: see `VERSION`.
 
 ---
 
-## 0. The app: pick Role and OS
+## 0. Simple setup: one PIN
 
-`app/` is a thin front end. It asks two questions and runs the matching verified
-script. It does not reimplement the flow and it holds no secrets.
+The primary path needs no connection code, no Tailscale auth key, and no IP
+address.
 
-| | Host | Client |
-|---|---|---|
-| **Linux** | `host/provision.sh` | not shipped |
-| **macOS** | `host/provision.sh` | `client/setup-macos.sh` |
-| **Windows** | not shipped | `client/setup.ps1` |
+1. **Host, Linux or macOS.** Start sharing:
+   - double-click `host/Herdr-Provision.desktop` or
+     `host/Herdr-Provision.command`; or
+   - run `host/pair.sh`.
+   The host prints a computer name and a 6-digit PIN.
+2. **Client, Windows.** Double-click `app\Herdr-Setup.cmd`.
+   Click **Connect to a computer**. Pick the computer. Enter the PIN. Click
+   **Connect**. Then click **Open herdr**.
+3. Done. The machine is added to herdr and the watchdog is installed.
 
-- Windows: double-click `app\Herdr-Setup.cmd`. It is a WinForms app.
-- Linux: double-click `app/Herdr-Setup.desktop` or `host/Herdr-Provision.desktop`.
-  Each file resolves its own folder, so the package can be extracted anywhere.
-- macOS: double-click `app/Herdr-Setup.command` or
-  `host/Herdr-Provision.command`.
-- Optional: run `host/install-desktop.sh` to add application-menu entries and a
-  Desktop shortcut. It writes absolute paths for this machine.
-- A flow runs only on the OS it belongs to. Pick another OS and the app shows
-  the machine, the file, and the command instead of pretending to run it.
-- Self-test without a second machine:
-  `powershell -File app\herdr-setup.ps1 -SelfTest` or
-  `bash app/herdr-setup.sh --self-test`.
+No `tskey-...` value. No base64 code. No IP address. No command line.
+
+| Action | Linux | macOS | Windows |
+|--------|:---:|:---:|:---:|
+| Share this computer | yes | yes | not shipped |
+| Connect with a PIN | not shipped | Advanced flow in 4.0.0 | yes |
+| Advanced connection code | yes | yes | yes |
+
+The host pairing service listens on the Tailscale address only. The PIN is six
+digits, rotates after each successful connection, and allows five wrong attempts
+in five minutes. Under the hood the flow still uses OpenSSH key transport. The
+host appends the client key automatically, then the client runs
+`herdr machine add`.
+
+The old role and OS app is under **Advanced setup** in the Windows app, or
+`app/herdr-setup-advanced.sh` on Linux and macOS. The connection-code flow is
+described in sections 1 to 6.
 
 Runtime choice, from what is installed on the three targets:
 
 | Target | Evidence | Result |
 |---|---|---|
-| Linux host | python3 3.13 present, **no tkinter**, **no DISPLAY** | Tkinter cannot run |
+| Linux host | python3 3.13 present, **no tkinter**, **no DISPLAY** | shell host and pairing service |
 | Windows client | PowerShell 5.1 + WinForms present, no install | WinForms |
 | macOS | Command Line Tools `python3` does not ship tkinter reliably | shell menu |
 
-So the app is native and tiny: WinForms on Windows, a shell menu on Linux and
-macOS. No Electron, no Tauri, no Python runtime to install.
+The app stays native and tiny: WinForms on Windows, a shell menu on Linux and
+macOS. No Electron, no Tauri, no Python runtime to install on Windows.
 
 ---
 
-## 1. Two transport modes
+## 1. Advanced: two transport modes
 
 | Mode | Authorization | SSH key needed | Use |
 |------|---------------|:---:|-----|
@@ -327,33 +336,41 @@ The client prefers `dns`, then falls back to each address in `ips`.
 ├── SECURITY.md
 ├── CONTRIBUTING.md
 ├── app/
-│   ├── Herdr-Setup.cmd          # Windows double-click
-│   ├── herdr-setup.ps1          # Windows app (WinForms, PS 5.1)
-│   ├── Herdr-Setup.command      # macOS double-click
-│   ├── Herdr-Setup.desktop      # Linux double-click (portable Exec)
-│   ├── herdr-setup.sh           # Linux/macOS app (shell menu)
+│   ├── Herdr-Setup.cmd          # Windows simple app (recommended)
+│   ├── Herdr-Connect.cmd        # same Windows simple app
+│   ├── herdr-connect.ps1        # two-button Windows client
+│   ├── herdr-setup.ps1          # advanced role/OS Windows app
+│   ├── Herdr-Setup.command      # macOS Share / Connect / Advanced menu
+│   ├── Herdr-Setup.desktop      # Linux Share / Advanced menu
+│   ├── herdr-setup.sh           # simple Linux/macOS menu
+│   ├── herdr-setup-advanced.sh  # old role/OS shell app
 │   └── launch-app.sh            # opens a terminal for the desktop entry
 ├── host/
-│   ├── provision.sh            # one-command entry (recommended)
-│   ├── provision-gui.sh        # one-dialog entry (needs zenity)
-│   ├── launch-provision.sh     # clickable launcher (opens a terminal)
-│   ├── Herdr-Provision.command # macOS double-click
-│   ├── Herdr-Provision.desktop # Linux double-click (portable Exec)
-│   ├── setup.sh                # lower-level entry point (Linux + macOS)
+│   ├── pair.py                 # pairing service: PIN, key append
+│   ├── pair.sh                 # one-command share flow
+│   ├── launch-pair.sh          # clickable share launcher
+│   ├── provision.sh            # advanced one-command code flow
+│   ├── provision-gui.sh        # one-dialog code flow (needs zenity)
+│   ├── launch-provision.sh     # advanced clickable launcher
+│   ├── Herdr-Provision.command # macOS Share launcher
+│   ├── Herdr-Provision.desktop # Linux Share launcher
+│   ├── setup.sh                # advanced lower-level entry
 │   ├── setup-gui.sh            # zenity wrapper
-│   ├── enroll.py               # one-time key enrollment endpoint
+│   ├── enroll.py               # advanced one-time key enrollment
 │   ├── enroll.sh               # enrollment launcher
 │   ├── install-desktop.sh      # menu entries and Desktop shortcut
 │   └── install-autostart.sh    # boot-time Tailscale guard
 ├── client/
-│   ├── setup.cmd
-│   ├── setup.ps1
+│   ├── pair.ps1                # Windows PIN client
+│   ├── setup.cmd               # advanced code client
+│   ├── setup.ps1               # advanced code client
 │   ├── setup-gui.ps1
-│   ├── watchdog.ps1            # restarts a stalled local client
-│   ├── install-watchdog.ps1    # installs the watchdog task
-│   ├── setup-macos.sh          # macOS client flow
-│   ├── watchdog-macos.sh       # macOS watchdog
-│   ├── install-watchdog-macos.sh  # LaunchAgent installer
+│   ├── watchdog.ps1
+│   ├── install-watchdog.ps1
+│   ├── watchdog-hidden.vbs
+│   ├── setup-macos.sh          # macOS advanced code client
+│   ├── watchdog-macos.sh
+│   ├── install-watchdog-macos.sh
 │   └── assets/herdr-windows-x86_64.zip  # Apache-2.0, see THIRD-PARTY.md
 ├── tools/
 │   ├── verify-package.ps1
@@ -396,12 +413,19 @@ bash app/herdr-setup.sh --self-test
 
 ## 8. Security notes
 
-- The connection code is base64, not encryption. It can carry a Tailscale auth
-  key. Treat it as a secret.
-- The setup CLIs and the Windows app pass the code to a child process as a
-  command-line argument. A local administrator can see it in the process list
+- The 6-digit PIN is a secret. It is single-use per connection, rotates after a
+  success, and allows five wrong attempts in five minutes.
+- The pairing service binds the Tailscale address only, on port 8765. It uses
+  plain HTTP inside the tailnet, which WireGuard encrypts. It is not exposed to
+  the LAN or the internet.
+- The simple flow does not create a `tskey-...` value. Tailscale login is
+  interactive on both machines.
+- The advanced flow still uses a connection code. It is base64, not encryption,
+  and can carry a Tailscale auth key. Treat it as a secret.
+- The setup CLIs and the Windows app pass the PIN or code to a child process as
+  a command-line argument. A local administrator can see it in the process list
   while the setup runs.
-- Use single-use, short-expiry auth keys for clients.
+- Use single-use, short-expiry auth keys for advanced clients.
 - `ts-ssh` removes key sprawl but relies on the ACL. Use `action: accept` only
   with a narrow `src`/`dst`/`users` tuple.
 - Logs redact `tskey-...` values. The code itself is never logged.

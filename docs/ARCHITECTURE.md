@@ -63,16 +63,50 @@ Measured on the Linux host: the running server and a Python
 `start_new_session=True` child both show `pgrp == session == pid` and `tty=?`.
 The macOS runner passes `python3` and `enroll.py` through the same helper.
 
+## Simple pairing
+
+The primary user path is a 6-digit PIN.
+
+```
+Host A                             Machine B
+host/pair.sh                       app Herdr-Setup.cmd
+  pairing service :8765              scan tailnet peers
+  shows PIN 123456  <--- PIN ---     POST key + PIN
+  appends key                        SSH, herdr machine add
+```
+
+- `host/pair.py` binds the Tailscale IPv4 address at port 8765. It does not bind
+  the LAN or the internet.
+- `GET /api/info` identifies the service and returns the host and login user.
+- `POST /api/request` takes the PIN, the client name, and an SSH public key. A
+  correct PIN appends the key to `~/.ssh/authorized_keys` with mode 600.
+- The PIN is six digits, rotates after each success, expires after 30 minutes,
+  and allows five wrong attempts per source in five minutes. It is never logged.
+- The client finds sharing hosts by probing each tailnet peer at port 8765. The
+  fixed port is a deliberate exception to the port-0 rule for enrollment:
+  discovery needs a known port. The service is bound to the tailnet and gated by
+  the PIN.
+- The client then connects over OpenSSH key, runs `herdr machine add`, and
+  installs the watchdog.
+- The traffic is plain HTTP inside the tailnet. WireGuard encrypts it. The PIN
+  authorizes the key exchange.
+
+This removes the connection code and the Tailscale auth key from the normal
+flow. It still needs a Tailscale account on both machines. A UU-level experience
+without a Tailscale account would need a hosted rendezvous and relay service,
+which is a different product.
+
 ## The app
 
 `app/` is a front end. The verified scripts stay the source of truth.
 
-```
-Role x OS  ->  support matrix  ->  run | guidance | unsupported
-```
+- Simple Windows: `app/herdr-connect.ps1` calls `client/pair.ps1`.
+- Simple Linux/macOS: `app/herdr-setup.sh` offers Share, Connect, and Advanced.
+- Advanced Windows: `app/herdr-setup.ps1` is the role/OS and connection-code app.
+- Advanced Linux/macOS: `app/herdr-setup-advanced.sh` is the old role/OS app.
 
-The matrix has six rows and lives once per front end. A `run` row becomes
-`guidance` when its OS is not the local OS. Nothing is started in that case.
+The advanced app uses a six-row support matrix. A `run` row becomes `guidance`
+when its OS is not the local OS. Nothing is started in that case.
 
 Runtime choice is evidence based:
 
@@ -84,16 +118,16 @@ Runtime choice is evidence based:
 
 A local web page was rejected because it needs a helper to run commands, and a
 helper needs a runtime that at least one target lacks. Electron and Tauri were
-rejected as too heavy for a two-question launcher.
+rejected as too heavy for a two-button pair.
 
 | Front end | Platform | Needs |
 |-----------|----------|-------|
+| `app/herdr-connect.ps1` | Windows | PowerShell 5.1, .NET Framework |
+| `client/pair.ps1` | Windows | OpenSSH, herdr |
 | `app/herdr-setup.ps1` | Windows | PowerShell 5.1, .NET Framework |
 | `app/herdr-setup.sh` | Linux, macOS | `/bin/bash` 3.2+ |
 
-Both support `--self-test`, and both have a dry run that prints the resolved
-command with the code masked. The Windows app also has a headless `-NoGui`
-path, so the dispatch table can be tested without a desktop.
+All have a self-test. The Windows apps have a headless path for tests.
 
 ## Transport modes
 
@@ -120,6 +154,9 @@ Observed evidence:
 Default mode is `key`. `auto` remains available for experiments only.
 
 ## Key enrollment
+
+This is the advanced flow. The simple PIN flow uses `host/pair.py` and does not
+use this endpoint.
 
 Manual key authorization is the only step the product could not automate.
 `host/enroll.py` closes it:
@@ -203,10 +240,12 @@ idempotent and safe to run on every boot.
 
 ## Connection code
 
+This is the advanced flow. The simple PIN flow does not use a connection code.
+
 ### v2 (current)
 
 ```
-base64("v=2;mode=ts-ssh;user=<u>;host=<h>;dns=<fqdn>;ips=<csv>;ts=<epoch>;tag=<tag>;key=<authkey>")
+base64("v=2;mode=key;user=<u>;host=<h>;dns=<fqdn>;ips=<csv>;ts=<epoch>;tag=<tag>;key=<authkey>")
 ```
 
 | Key | Required | Meaning |
@@ -254,6 +293,9 @@ Host (Linux and macOS):
 
 ```
 ~/.local/state/herdr-setup/setup.log
+~/.local/state/herdr-setup/pair.log             600
+~/.local/state/herdr-setup/pair.pin             600, removed on exit
+~/.local/state/herdr-setup/pair.port            600, removed on exit
 ~/.local/state/herdr-setup/connection-code.txt   600
 ~/.local/state/herdr-setup/enroll.port           600
 ~/.local/state/herdr-setup/enroll.txt            600
