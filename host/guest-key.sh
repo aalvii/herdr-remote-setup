@@ -51,6 +51,7 @@ python3 - "$MODE" <<'PY'
 import base64
 import json
 import os
+import stat
 import sys
 import time
 import urllib.error
@@ -101,8 +102,18 @@ def parse_key(payload):
 
 def read_key_file():
     try:
-        with open(KEY_FILE, "r", encoding="utf-8") as handle:
-            key = handle.read().strip()
+        with open(KEY_FILE, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            mode = stat.S_IMODE(info.st_mode)
+            if not key_file_layout_ok(mode, info.st_uid, os.geteuid()):
+                if mode & 0o077:
+                    print("X %s is readable by group or others" % KEY_FILE, file=sys.stderr)
+                    print("  Run: sudo chmod 600 %s" % KEY_FILE, file=sys.stderr)
+                else:
+                    print("X %s is not owned by root" % KEY_FILE, file=sys.stderr)
+                    print("  Run: sudo chown root:root %s" % KEY_FILE, file=sys.stderr)
+                return None
+            key = handle.read().decode("utf-8").strip()
     except OSError as error:
         print("X cannot read %s: %s" % (KEY_FILE, error), file=sys.stderr)
         return None
@@ -110,6 +121,14 @@ def read_key_file():
         print("X %s is empty" % KEY_FILE, file=sys.stderr)
         return None
     return key
+
+
+def key_file_layout_ok(mode, uid, euid):
+    if mode & 0o077:
+        return False
+    if euid == 0 and uid != 0:
+        return False
+    return True
 
 
 def create():
@@ -169,6 +188,9 @@ def self_test():
     check("key is preauthorized", create_caps["preauthorized"] is True)
     check("key joins as the guest tag", create_caps["tags"] == ["tag:client"])
     check("body is valid json", json.loads(json.dumps(body)) == body)
+    check("group-readable token is refused", not key_file_layout_ok(0o644, 1000, 0))
+    check("mode 600 token is accepted", key_file_layout_ok(0o600, 0, 0))
+    check("non-root token owner is refused", not key_file_layout_ok(0o600, 1000, 0))
 
     # The real API rejects a colon here with HTTP 400, so guard the shape.
     stamp = time.strptime("2026-11-16T08:41:12", "%Y-%m-%dT%H:%M:%S")

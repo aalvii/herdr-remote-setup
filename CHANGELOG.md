@@ -1,5 +1,45 @@
 # Changelog
 
+## 4.0.3 - 2026-11-16
+
+Fix pairing races and watchdog false positives.
+
+### Fixed
+
+- `host/pair.py`: one lock now covers the PIN check, the key append, and the
+  PIN rotation. Two concurrent requests cannot add two keys with one PIN.
+- `host/pair.py`: reject a PIN that is not six ASCII digits before the
+  constant-time compare. A non-ASCII PIN now returns 401 instead of closing
+  the connection.
+- `host/pair.py`: each request has a 10-second socket timeout.
+- `host/ensure-acl.sh`: a legacy `acls` rule must name `tag:herdr-host` in
+  `dst`. A rule that names another tag or a wildcard no longer counts as ready.
+  The script refuses to write while such a rule remains.
+- `host/ensure-acl.sh`: the trailing-comma cleanup keeps commas inside string
+  values.
+- `host/ensure-acl.sh`: the pairing port is part of the ACL grant. A custom
+  `--port` now works end to end.
+- `host/ensure-acl.sh` and `host/guest-key.sh`: refuse an API token file that
+  is readable by group or others, or that root does not own.
+- `client/watchdog.ps1` and `client/watchdog-macos.sh`: an `unknown` log state
+  is healthy. The watchdog restarts only on `stuck` or `fail`.
+- `client/watchdog.ps1` and `client/watchdog-macos.sh`: match only the TUI
+  command, `herdr` or `herdr --machine`. They no longer stop `herdr status`,
+  `herdr-core`, the SSH helper, or an unrelated job.
+
+### Added
+
+- `tools/test-pair.py`: localhost tests for the PIN protocol, the non-ASCII
+  PIN, malformed JSON, duplicate keys, repeated one-winner races, and the rate
+  limit.
+- Self-tests for the watchdog state gate and the Windows and macOS client
+  matchers.
+
+### Changed
+
+- README, ARCHITECTURE, and TROUBLESHOOTING describe the watchdog state gate,
+  the TUI-only macOS match, and the ACL token requirement.
+
 ## 4.0.2 - 2026-11-16
 
 Host-generated guest join codes and ACL automation.

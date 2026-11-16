@@ -49,7 +49,8 @@ A guest without a Tailscale account can join the owner's tailnet as a tagged
 
 The host never writes the policy when the required entries already exist. It
 adds only missing entries, keeps a backup under `/etc/herdr-setup`, and prints
-the JSON snippet when it cannot write. Without the token the flow is PIN-only,
+the JSON snippet when it cannot write. It refuses to write while an existing
+guest rule reaches another destination. Without the token the flow is PIN-only,
 as in 4.0.0.
 
 Use `host/pair.sh --no-join-code` for PIN-only sharing, and
@@ -323,8 +324,10 @@ bash install-watchdog-macos.sh --uninstall
 ```
 
 It acts only when the last log event is a failure and the log has been idle for
-the stale window (default 3 minutes). It never stops the server, so panes and
-agents survive.
+the stale window (default 3 minutes). An unknown or healthy state does nothing.
+Both watchdogs match only the TUI command, `herdr` or `herdr --machine ...`.
+On Windows the executable is `herdr.exe`. They do not match `herdr status`,
+the server, the bridge, or unrelated processes. Panes and agents survive.
 
 ## 4. Connection code format
 

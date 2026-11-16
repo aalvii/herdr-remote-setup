@@ -1,6 +1,6 @@
 # Using Herdr Remote Setup
 
-This guide is the complete operator instruction for version 4.0.2. It covers
+This guide is the complete operator instruction for version 4.0.3. It covers
 the simple PIN flow, the optional guest join code, the checks, and the cleanup.
 
 Read `README.md` section 0 for the short version, and `docs/ARCHITECTURE.md` for
@@ -123,7 +123,7 @@ bash host/pair.sh
 The window shows four things:
 
 ```text
-Herdr Share v4.0.2
+Herdr Share v4.0.3
   Computer : <host name>
   User     : <login user>
   Address  : 100.x.y.z:8765
@@ -197,7 +197,7 @@ machine.
 
 ## 6. Connect from macOS or Linux
 
-The PIN app is Windows-only in 4.0.2. On macOS use the Advanced connection-code
+The PIN app is Windows-only in 4.0.3. On macOS use the Advanced connection-code
 flow. README sections 1 to 6 describe it, and `docs/SETUP-A-AND-B.md` is the
 two-machine runbook.
 

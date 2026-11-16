@@ -109,10 +109,45 @@ cat >"$WORK/missing.hujson" <<'EOF'
   "ssh": [{"action": "check", "src": ["autogroup:member"], "dst": ["tag:herdr-host"], "users": ["box"]}],
 }
 EOF
+cat >"$WORK/wildcard.hujson" <<'EOF'
+{
+  "tagOwners": {
+    "tag:client": ["autogroup:admin"],
+  },
+  "acls": [
+    {"action": "accept", "src": ["tag:client"], "dst": ["*:22", "*:8765"]},
+  ],
+}
+EOF
+cat >"$WORK/default-port.hujson" <<'EOF'
+{
+  "tagOwners": {
+    "tag:client": ["autogroup:admin"],
+  },
+  "grants": [
+    {"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", "tcp:8765"]},
+  ],
+}
+EOF
+cat >"$WORK/unsafe-existing.hujson" <<'EOF'
+{
+  "tagOwners": {
+    "tag:client": ["autogroup:admin"],
+  },
+  "grants": [
+    {"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", "tcp:8765"]},
+  ],
+  "acls": [
+    {"action": "accept", "src": ["tag:client"], "dst": ["tag:other:22"]},
+  ],
+}
+EOF
 printf 'this is not a policy\n' >"$WORK/broken.txt"
+printf '[]\n' >"$WORK/non-object.json"
 # Both values are built from parts so a secret scanner sees no key shape.
 FAKE_KEY="tskey""-auth-""example-not-a-secret"
 printf '%s\n' "tskey""-api-example-not-a-secret" >"$WORK/api.key"
+chmod 600 "$WORK/api.key"
 export HERDR_TS_API_KEY_FILE="$WORK/api.key"
 export HERDR_ACL_BACKUP_DIR="$WORK/backup"
 
@@ -177,6 +212,45 @@ PY
 )" "merged policy keeps the other rules"
 stop_api
 
+comment "ensure-acl: custom pairing port"
+start_api "$WORK/default-port.hujson"
+out="$WORK/out-port.txt"
+HERDR_ACL_BACKUP_DIR="$WORK/backup-port" bash "$ACL" --port 9000 >"$out" 2>&1
+expect_rc 0 $? "custom port is added"
+check "custom port keeps the default" "$(python3 - "$MOCK_DIR" <<'PY'
+import json, os, sys
+path = os.path.join(sys.argv[1], "acl-body-1.json")
+body = json.loads(open(path, encoding="utf-8").read())
+ports = body["grants"][0]["ip"]
+print(0 if "tcp:9000" in ports and "tcp:8765" in ports else 1)
+PY
+)" "custom port is written and the default remains"
+stop_api
+
+comment "ensure-acl: wildcard legacy acl"
+start_api "$WORK/wildcard.hujson"
+out="$WORK/out-wildcard.txt"
+bash "$ACL" --no-acl-write >"$out" 2>&1
+expect_rc 3 $? "wildcard acl is not ready"
+expect_out "$out" "tag:herdr-host" "wildcard acl names the host requirement"
+stop_api
+
+start_api "$WORK/wildcard.hujson"
+out="$WORK/out-wildcard-write.txt"
+bash "$ACL" >"$out" 2>&1
+expect_rc 3 $? "wildcard acl is not auto-fixed"
+expect_out "$out" "does not remove existing rules" "wildcard acl explains the refusal"
+check "wildcard acl is not written" "$([ "$(acl_writes)" -eq 0 ] && echo 0 || echo 1)"
+stop_api
+
+start_api "$WORK/unsafe-existing.hujson"
+out="$WORK/out-unsafe-existing.txt"
+bash "$ACL" >"$out" 2>&1
+expect_rc 3 $? "unsafe rule is refused when the host rule exists"
+expect_out "$out" "does not remove existing rules" "unsafe rule explains the refusal"
+check "unsafe rule is not written" "$([ "$(acl_writes)" -eq 0 ] && echo 0 || echo 1)"
+stop_api
+
 # ---------- ensure-acl: unparsable policy ----------
 comment "ensure-acl: unparsable policy"
 start_api "$WORK/broken.txt"
@@ -185,6 +259,17 @@ bash "$ACL" >"$out" 2>&1
 expect_rc 3 $? "unparsable policy exits 3"
 expect_out "$out" "cannot be parsed" "unparsable policy says so"
 check "unparsable policy is not written" "$([ "$(acl_writes)" -eq 0 ] && echo 0 || echo 1)"
+stop_api
+
+# ---------- ensure-acl: policy is not an object ----------
+comment "ensure-acl: policy is not an object"
+start_api "$WORK/non-object.json"
+out="$WORK/out-non-object.txt"
+bash "$ACL" >"$out" 2>&1
+expect_rc 3 $? "non-object policy exits 3"
+expect_out "$out" "the policy must be a JSON object" "non-object policy says so"
+expect_missing_out "$out" "Traceback" "non-object policy has no traceback"
+check "non-object policy is not written" "$([ "$(acl_writes)" -eq 0 ] && echo 0 || echo 1)"
 stop_api
 
 # ---------- ensure-acl: token cannot read ----------
@@ -213,6 +298,14 @@ HERDR_TS_API_KEY_FILE="$WORK/absent.key" bash "$ACL" >"$out" 2>&1
 expect_rc 2 $? "missing API key exits 2"
 expect_out "$out" "no Tailscale API token" "missing API key says so"
 
+comment "ensure-acl: token mode"
+chmod 644 "$WORK/api.key"
+out="$WORK/out-mode.txt"
+bash "$ACL" --no-acl-write >"$out" 2>&1
+expect_rc 2 $? "group-readable token exits 2"
+expect_out "$out" "readable by group or others" "group-readable token says so"
+chmod 600 "$WORK/api.key"
+
 # ---------- guest-key ----------
 comment "guest-key: create a join code"
 start_api "$WORK/ready.hujson"
@@ -237,6 +330,15 @@ print(0 if ok else 1)
 PY
 )" "request body asks for a single-use tagged key"
 stop_api
+
+comment "guest-key: token mode"
+chmod 644 "$WORK/api.key"
+out="$WORK/out-key-mode.txt"
+err="$WORK/out-key-mode.err"
+bash "$KEY" >"$out" 2>"$err"
+expect_rc 2 $? "guest-key refuses group-readable token"
+expect_out "$err" "readable by group or others" "guest-key token mode says so"
+chmod 600 "$WORK/api.key"
 
 comment "guest-key: API refuses"
 start_api "$WORK/ready.hujson" --keys-status 403
