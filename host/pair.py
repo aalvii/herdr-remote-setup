@@ -19,7 +19,6 @@ Security:
 """
 
 import argparse
-import hmac
 import json
 import os
 import re
@@ -29,16 +28,11 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import hostlib
+
 SERVICE = "herdr-pair"
 PROTOCOL = 1
 MAX_BODY = 8192
-KEY_PREFIXES = (
-    "ssh-ed25519 ",
-    "ssh-rsa ",
-    "ecdsa-sha2-",
-    "sk-ssh-ed25519@",
-    "sk-ecdsa-sha2-",
-)
 
 ARGS = None
 PIN = ""
@@ -85,16 +79,7 @@ def set_pin(pin):
 
 
 def valid_key(key):
-    if not key or len(key) > 2000:
-        return False
-    if "\n" in key or "\r" in key:
-        return False
-    if not key.startswith(KEY_PREFIXES):
-        return False
-    parts = key.split()
-    if len(parts) < 2:
-        return False
-    return len(parts[1]) >= 32
+    return hostlib.parse_key(key) is not None
 
 
 def sanitize(value, limit=64):
@@ -104,36 +89,7 @@ def sanitize(value, limit=64):
 
 def append_key(key, name):
     path = os.path.expanduser(ARGS.authorized_keys)
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    try:
-        os.chmod(directory, 0o700)
-    except OSError:
-        pass
-
-    existing = ""
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            existing = handle.read()
-
-    blob = key.split()[1]
-    if blob in existing:
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-        return True
-
-    line = key.strip()
-    with open(path, "a", encoding="utf-8") as handle:
-        if existing and not existing.endswith("\n"):
-            handle.write("\n")
-        handle.write(line + "\n")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-    return False
+    return hostlib.append_key(path, key)
 
 
 def rate_limited(source):
@@ -174,6 +130,18 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):  # noqa: N802
+        try:
+            self._request()
+        except Exception as exc:  # noqa: BLE001 - the handler must not die
+            source = self.client_address[0]
+            record_fail(source)
+            log("error source=%s reason=%s" % (source, exc))
+            try:
+                self._json(500, {"ok": False, "error": "internal error"})
+            except Exception:
+                pass
+
+    def _request(self):
         if self.path != "/api/request":
             return self._json(404, {"ok": False, "error": "not found"})
 
@@ -194,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
         key = str(data.get("publicKey", "")).strip()
         name = sanitize(data.get("name", "client"))
 
-        if not hmac.compare_digest(pin, PIN):
+        if not hostlib.secret_equals(pin, PIN):
             record_fail(source)
             log("deny source=%s name=%s reason=bad-pin" % (source, name))
             return self._json(401, {"ok": False, "error": "bad pin"})
