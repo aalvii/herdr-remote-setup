@@ -81,6 +81,16 @@ def request_body(expiry, description):
     }
 
 
+def make_description(moment):
+    """Describe the key for the admin console.
+
+    The Tailscale API accepts only letters, digits, spaces, dots, dashes, and
+    underscores here. A colon in an ISO timestamp is rejected with HTTP 400
+    "keys: description had invalid characters", so the time has no colons.
+    """
+    return "herdr guest %s" % time.strftime("%Y-%m-%dT%H%M%SZ", moment)
+
+
 def parse_key(payload):
     data = json.loads(payload)
     key = data.get("key")
@@ -107,7 +117,7 @@ def create():
     if not key:
         return 2
 
-    description = "herdr guest %s" % time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    description = make_description(time.gmtime())
     body = json.dumps(request_body(EXPIRY, description)).encode("utf-8")
     url = "%s/tailnet/%s/keys" % (API, TAILNET)
     request = urllib.request.Request(url, data=body, method="POST")
@@ -159,6 +169,15 @@ def self_test():
     check("key is preauthorized", create_caps["preauthorized"] is True)
     check("key joins as the guest tag", create_caps["tags"] == ["tag:client"])
     check("body is valid json", json.loads(json.dumps(body)) == body)
+
+    # The real API rejects a colon here with HTTP 400, so guard the shape.
+    stamp = time.strptime("2026-11-16T08:41:12", "%Y-%m-%dT%H:%M:%S")
+    description = make_description(stamp)
+    check("description has no colons", ":" not in description)
+    check(
+        "description is api safe",
+        all(c.isalnum() or c in " ._-" for c in description),
+    )
 
     # Built from parts so a secret scanner sees no key shape.
     fixture = "tskey" + "-auth-" + "example-not-a-secret"
