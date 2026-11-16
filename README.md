@@ -20,10 +20,12 @@ script. It does not reimplement the flow and it holds no secrets.
 | **Windows** | not shipped | `client/setup.ps1` |
 
 - Windows: double-click `app\Herdr-Setup.cmd`. It is a WinForms app.
-- Linux or macOS: run `host/install-desktop.sh` once. It adds **Herdr Remote
-  Setup (App)** to the application menu and creates a Desktop shortcut. Run
-  `app/Herdr-Setup.command` directly on macOS.
-- No absolute paths are stored in the package. The installer writes them.
+- Linux: double-click `app/Herdr-Setup.desktop` or `host/Herdr-Provision.desktop`.
+  Each file resolves its own folder, so the package can be extracted anywhere.
+- macOS: double-click `app/Herdr-Setup.command` or
+  `host/Herdr-Provision.command`.
+- Optional: run `host/install-desktop.sh` to add application-menu entries and a
+  Desktop shortcut. It writes absolute paths for this machine.
 - A flow runs only on the OS it belongs to. Pick another OS and the app shows
   the machine, the file, and the command instead of pretending to run it.
 - Self-test without a second machine:
@@ -328,6 +330,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 │   ├── Herdr-Setup.cmd          # Windows double-click
 │   ├── herdr-setup.ps1          # Windows app (WinForms, PS 5.1)
 │   ├── Herdr-Setup.command      # macOS double-click
+│   ├── Herdr-Setup.desktop      # Linux double-click (portable Exec)
 │   ├── herdr-setup.sh           # Linux/macOS app (shell menu)
 │   └── launch-app.sh            # opens a terminal for the desktop entry
 ├── host/
@@ -335,6 +338,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 │   ├── provision-gui.sh        # one-dialog entry (needs zenity)
 │   ├── launch-provision.sh     # clickable launcher (opens a terminal)
 │   ├── Herdr-Provision.command # macOS double-click
+│   ├── Herdr-Provision.desktop # Linux double-click (portable Exec)
 │   ├── setup.sh                # lower-level entry point (Linux + macOS)
 │   ├── setup-gui.sh            # zenity wrapper
 │   ├── enroll.py               # one-time key enrollment endpoint

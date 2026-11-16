@@ -2,12 +2,11 @@
 
 One page: from a fresh host and a fresh client to a working herdr remote
 session. Hosts: Linux or macOS. Clients: Windows or macOS. Version: see
-`VERSION` (currently 3.1.0).
+`VERSION` (currently 3.1.1).
 
 For the no-command-line path, open `app/` first: `Herdr-Setup.cmd` on Windows,
-`Herdr-Setup.command` on macOS, or run `host/install-desktop.sh` once on Linux
-and use the menu entry. Pick Role and OS. The rest of this page is the same flow
-with the commands shown.
+`Herdr-Setup.command` on macOS, or `Herdr-Setup.desktop` on Linux. Pick Role
+and OS. The rest of this page is the same flow with the commands shown.
 
 ---
 
@@ -85,13 +84,15 @@ Desktop alternative: `./provision-gui.sh`, or install the menu entry with
 
 ### No commands at all
 
-Run `./install-desktop.sh` once. It adds **Herdr Remote Setup**, **Herdr Remote
-Setup (App)**, and **Herdr: New Client Code** to the application menu, and puts
-a Desktop shortcut in `~/Desktop`.
+Double-click `host/Herdr-Provision.desktop` in the file manager. It opens a
+terminal, runs the flow, and keeps the code visible. The file resolves its own
+folder, so it works wherever the package is extracted.
 
-The launcher opens a terminal window, runs the flow, and keeps the window open
-so the code stays visible. No absolute path is stored in the repository; the
-installer writes the paths for this machine.
+If the file manager marks it untrusted, right-click it and choose **Allow this
+file to be executed**. If the file manager opens it as text, run
+`./install-desktop.sh` once instead. That adds **Herdr Remote Setup**, **Herdr
+Remote Setup (App)**, and **Herdr: New Client Code** to the application menu,
+and puts a Desktop shortcut in `~/Desktop`.
 
 The launcher picks its behavior automatically:
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.1.1 - 2026-11-15
+
+Restore the portable double-click launchers.
+
+### Added
+
+- `host/Herdr-Provision.desktop` and `app/Herdr-Setup.desktop`. Each file uses
+  the `%k` field code to resolve its own folder, so the repository stores no
+  absolute path. Both pass `desktop-file-validate`, and the resolved path works
+  when it contains a space.
+- `install-desktop.sh` remains the option for absolute menu entries and a
+  Desktop shortcut.
+
+### Changed
+
+- `VERSION` is 3.1.1.
+- README, QUICKSTART, ARCHITECTURE, and TROUBLESHOOTING describe the portable
+  launchers.
+
+---
+
 ## 3.1.0 - 2026-11-15
 
 Public repository release. The product behavior is unchanged.

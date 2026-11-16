@@ -40,10 +40,14 @@ macOS differences that the code handles:
 | Addresses | `ip -4 addr` | `ifconfig` |
 | Clipboard | xclip, xsel, wl-copy | `pbcopy` |
 | Watchdog | scheduled task | LaunchAgent |
-| Launcher | generated `.desktop` | `.command` |
+| Launcher | portable `.desktop` | `.command` |
 
 `$HOME` must not be group or other writable on macOS, or sshd refuses the key.
 The host script removes write permission when it finds it.
+
+The shipped `.desktop` files use the `%k` field code to resolve their own folder,
+so the repository stores no absolute path. `install-desktop.sh` writes absolute
+menu entries for the current machine when a user wants them.
 
 ## Detached start
 

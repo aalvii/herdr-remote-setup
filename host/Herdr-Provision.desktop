@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Herdr: New Client Code
+Comment=Generate a connection code for a new client machine
+Exec=sh -c "p=\${1#file://}; d=\$(dirname \"\$p\"); cd \"\$d\" && exec bash ./launch-provision.sh" sh %k
+Icon=utilities-terminal
+Terminal=false
+Categories=Network;
+StartupNotify=true

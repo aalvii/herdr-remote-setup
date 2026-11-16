@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Herdr Remote Setup
+Comment=Pick Role and OS and run the matching setup flow
+Exec=sh -c "p=\${1#file://}; d=\$(dirname \"\$p\"); cd \"\$d\" && exec bash ./launch-app.sh" sh %k
+Icon=utilities-terminal
+Terminal=false
+Categories=Network;
+StartupNotify=true

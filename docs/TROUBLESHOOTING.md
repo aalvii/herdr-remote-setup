@@ -128,6 +128,20 @@ Gatekeeper quarantines files that came from a download. Allow it:
 - right-click the `.command` file, choose **Open**, then **Open** again; or
 - `xattr -d com.apple.quarantine /path/to/Herdr-Setup.command`.
 
+### Linux: the desktop file does not start
+
+Some file managers require the executable bit and a trust flag:
+
+```bash
+chmod +x host/Herdr-Provision.desktop app/Herdr-Setup.desktop
+```
+
+If the file manager still opens it as text, right-click and choose **Allow this
+file to be executed**. As a fallback, run `./host/install-desktop.sh` once and
+use the application-menu entry. A session without `DISPLAY` or
+`WAYLAND_DISPLAY` cannot show the terminal window; run the script in a terminal
+instead.
+
 ### Watchdog LaunchAgent does not run
 
 ```bash
