@@ -5,7 +5,12 @@
 # server are left untouched.
 #
 # Usage:
-#   bash watchdog-macos.sh [--dry-run] [--stale-minutes 3] [--quiet] [--client-log PATH]
+#   bash watchdog-macos.sh [--dry-run] [--stale-minutes 3] [--machine NAME]
+#                          [--quiet] [--client-log PATH]
+#
+# The relaunched client is started with --machine NAME. The name comes from
+# --machine, then HERDR_MACHINE, then the last label that the macOS setup
+# recorded in ~/Library/Application Support/HerdrSetup/machines.txt.
 #
 # Exit codes:
 #   0  healthy, nothing to do
@@ -24,6 +29,7 @@ DRY_RUN=0
 STALE_MINUTES=3
 QUIET=0
 CLIENT_LOG_ARG=""
+MACHINE_ARG=""
 ACTION="run"
 
 while [ $# -gt 0 ]; do
@@ -60,6 +66,18 @@ while [ $# -gt 0 ]; do
             CLIENT_LOG_ARG="${1#--client-log=}"
             shift
             ;;
+        --machine)
+            if [ $# -lt 2 ]; then
+                printf 'X --machine needs a value\n' >&2
+                exit "$EXIT_CANNOT"
+            fi
+            MACHINE_ARG="$2"
+            shift 2
+            ;;
+        --machine=*)
+            MACHINE_ARG="${1#--machine=}"
+            shift
+            ;;
         --help|-h)
             ACTION="help"
             shift
@@ -83,10 +101,12 @@ if [ "$ACTION" = "help" ]; then
 Herdr remote watchdog (macOS)
 
 Usage:
-  bash watchdog-macos.sh [--dry-run] [--stale-minutes N] [--quiet] [--client-log PATH]
+  bash watchdog-macos.sh [--dry-run] [--stale-minutes N] [--machine NAME]
+                         [--quiet] [--client-log PATH]
 
   --dry-run            Report what would be stopped, exit 11
   --stale-minutes N    Only act when the client log is older than N minutes (default 3)
+  --machine NAME       Label of the remote machine to relaunch the client for
   --quiet              Do not write to stdout
   --client-log PATH    Override the client log path
 
@@ -191,16 +211,24 @@ if [ "$_age_sec" -lt "$_stale_sec" ]; then
     exit "$EXIT_OK"
 fi
 
-# Find the TUI client only: the local server, the remote bridge, and this
-# watchdog must never be stopped.
+# Find the TUI client only. The match is on the program name, not a substring
+# of the whole command line: `herdr-core connect`, an SSH control master, and a
+# Node helper all carry "herdr" in their arguments and none of them is the
+# client. The local server and this watchdog are skipped for the same reason.
 PIDS=""
 for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
     _cmd="$(ps -o command= -p "$_pid" 2>/dev/null)"
     if [ -z "$_cmd" ]; then
         continue
     fi
-    case "$_cmd" in
-        *"herdr server"*) continue ;;
+    _cmd="${_cmd#"${_cmd%%[! ]*}"}"
+    _argv0="${_cmd%% *}"
+    _rest="${_cmd#"$_argv0"}"
+    if [ "${_argv0##*/}" != "herdr" ]; then
+        continue
+    fi
+    case "$_rest" in
+        " server"*) continue ;;
         *"remote-client-bridge"*) continue ;;
         *"watchdog-macos.sh"*) continue ;;
     esac
@@ -257,9 +285,34 @@ if ! command -v osascript >/dev/null 2>&1; then
     exit "$EXIT_CANNOT"
 fi
 
-_esc="$(printf '%s' "$HERDR" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+MACHINE="$MACHINE_ARG"
+if [ -z "$MACHINE" ]; then
+    MACHINE="${HERDR_MACHINE:-}"
+fi
+if [ -z "$MACHINE" ]; then
+    _labels="$HOME/Library/Application Support/HerdrSetup/machines.txt"
+    if [ -f "$_labels" ]; then
+        MACHINE="$(grep -v '^[[:space:]]*$' "$_labels" 2>/dev/null | tail -n 1 | tr -d '\r')"
+        MACHINE="${MACHINE#"${MACHINE%%[! ]*}"}"
+        MACHINE="${MACHINE%"${MACHINE##*[! ]}"}"
+    fi
+fi
+case "$MACHINE" in
+    *[!A-Za-z0-9._@:-]*) MACHINE="" ;;
+esac
+if [ -z "$MACHINE" ]; then
+    log "no machine label; relaunching without --machine"
+fi
 
-if ! osascript -e 'tell application "Terminal" to do script "exec '"$_esc"'"' >/dev/null 2>&1; then
+_esc="$(printf '%s' "$HERDR" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+if [ -n "$MACHINE" ]; then
+    _m_esc="$(printf '%s' "$MACHINE" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+    _launch="exec $_esc --machine \"$_m_esc\""
+else
+    _launch="exec $_esc"
+fi
+
+if ! osascript -e 'tell application "Terminal" to do script "'"$_launch"'"' >/dev/null 2>&1; then
     log "osascript failed to open a Terminal window"
     exit "$EXIT_CANNOT"
 fi
@@ -268,5 +321,5 @@ if ! osascript -e 'tell application "Terminal" to activate' >/dev/null 2>&1; the
     exit "$EXIT_CANNOT"
 fi
 
-log "relaunched $HERDR in Terminal"
+log "relaunched $HERDR${MACHINE:+ --machine $MACHINE} in Terminal"
 exit "$EXIT_RESTARTED"
