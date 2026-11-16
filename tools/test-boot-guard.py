@@ -75,6 +75,10 @@ esac
 
 RUNNING = '{"BackendState": "Running", "Self": {"Tags": ["tag:herdr-host"]}}'
 STOPPED = '{"BackendState": "Stopped", "Self": {"Tags": []}}'
+PEER_TAG_ONLY = ('{"BackendState": "Running", "Self": {"Tags": []}, '
+                 '"Peer": {"Tags": ["tag:herdr-host"]}}')
+SIMILAR_TAG = ('{"BackendState": "Running", '
+               '"Self": {"Tags": ["tag:herdr-host-2"]}}')
 PREFS_ON = '{"RunSSH": true}'
 PREFS_OFF = '{"RunSSH": false}'
 
@@ -199,6 +203,14 @@ def main():
         rc, out, called = guard.run(RUNNING, PREFS_ON, tag="")
         check("guard: no stored tag means no tag check", rc == 0 and not called,
               (rc, called, out))
+
+        rc, out, called = guard.run(PEER_TAG_ONLY, PREFS_ON)
+        check("guard: a peer tag does not satisfy the local tag",
+              rc == 0 and len(called) == 1, (rc, called, out))
+
+        rc, out, called = guard.run(SIMILAR_TAG, PREFS_ON)
+        check("guard: a similar-prefix tag does not satisfy the local tag",
+              rc == 0 and len(called) == 1, (rc, called, out))
 
         rc, out, called = guard.run(STOPPED, PREFS_ON, authkey="")
         check("guard: a missing auth key is a visible failure",

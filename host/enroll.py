@@ -42,7 +42,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import hostlib
 
 TOKEN = os.environ.get("HERDR_ENROLL_TOKEN", "")
-BIND = os.environ.get("HERDR_ENROLL_BIND", "127.0.0.1")
+BIND = os.environ.get("HERDR_ENROLL_BIND") or "127.0.0.1"
 PORT = int(os.environ.get("HERDR_ENROLL_PORT", "8787"))
 TTL = int(os.environ.get("HERDR_ENROLL_TTL", "600"))
 LOG = os.environ.get("HERDR_ENROLL_LOG", "")
@@ -66,12 +66,20 @@ def log(msg: str) -> None:
             pass
 
 
-def rate_limited(source: str) -> bool:
+def check_attempt(source: str, supplied: str) -> str:
+    """Check the code and count a wrong attempt in one locked step."""
     now = time.time()
     with LOCK:
         times = [t for t in FAILS.get(source, []) if now - t < FAIL_WINDOW]
+        if len(times) >= MAX_FAILS:
+            FAILS[source] = times
+            return "limited"
+        if not hostlib.secret_equals(supplied, TOKEN):
+            times.append(now)
+            FAILS[source] = times
+            return "bad"
         FAILS[source] = times
-        return len(times) >= MAX_FAILS
+        return "ok"
 
 
 def record_fail(source: str) -> None:
@@ -107,10 +115,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"ok": False, "error": "not found"})
 
         source = self.client_address[0]
-        if rate_limited(source):
-            log("deny source=%s reason=rate-limit" % source)
-            return self._send(429, {"ok": False, "error": "too many attempts"})
-
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length < 0 or length > 8192:
@@ -123,8 +127,11 @@ class Handler(BaseHTTPRequestHandler):
         code = str(data.get("code", ""))
         key = str(data.get("key", "")).strip()
 
-        if not hostlib.secret_equals(code, TOKEN):
-            record_fail(source)
+        attempt = check_attempt(source, code)
+        if attempt == "limited":
+            log("deny source=%s reason=rate-limit" % source)
+            return self._send(429, {"ok": False, "error": "too many attempts"})
+        if attempt == "bad":
             log("deny source=%s reason=bad-code" % source)
             return self._send(401, {"ok": False, "error": "bad code"})
 

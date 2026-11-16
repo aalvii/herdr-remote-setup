@@ -96,10 +96,14 @@ if [ "${TS_SSH:-1}" = "1" ]; then
 fi
 
 if [ -n "${TS_TAG:-}" ]; then
-  case "$status" in
-    *"$TS_TAG"*) : ;;
-    *) need_up=1 ;;
-  esac
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to check the local tag" >&2
+    need_up=1
+  elif ! printf '%s' "$status" | python3 -c \
+    'import json, sys; d = json.load(sys.stdin); sys.exit(0 if sys.argv[1] in d.get("Self", {}).get("Tags", []) else 1)' \
+    "$TS_TAG" 2>/dev/null; then
+    need_up=1
+  fi
 fi
 
 if [ "$need_up" -eq 0 ]; then

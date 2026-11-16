@@ -27,9 +27,13 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "host"))
+import hostlib
+
 PAIR = os.path.join(ROOT, "host", "pair.py")
 ENROLL = os.path.join(ROOT, "host", "enroll.py")
 PIN = "123456"
@@ -245,6 +249,117 @@ def test_pair_exact_blob():
           lines == [existing], lines)
 
 
+def test_pair_restricted_existing():
+    base = make_key("x")
+    existing = 'command="false",from="192.0.2.1" ' + base
+    with PairCase(keys=[existing]) as case:
+        status, body = case.post(PIN, base)
+        lines = case.key_lines()
+    check("pair: an option-protected key is already present",
+          status == 200 and body.get("alreadyPresent") is True, (status, body))
+    check("pair: an option-protected key is not duplicated without options",
+          lines == [existing], lines)
+
+
+def test_pair_parallel_rate_limit():
+    with PairCase() as case:
+        barrier = threading.Barrier(20)
+        statuses = []
+        lock = threading.Lock()
+
+        def send():
+            barrier.wait()
+            status, _ = case.post("999999", make_key("a"))
+            with lock:
+                statuses.append(status)
+
+        threads = [threading.Thread(target=send) for _ in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    check("pair: parallel wrong PINs stop at five",
+          statuses.count(401) <= MAX_FAILS
+          and statuses.count(429) >= 20 - MAX_FAILS,
+          statuses)
+
+
+def test_pair_parallel_success():
+    with PairCase() as case:
+        barrier = threading.Barrier(12)
+        statuses = []
+        lock = threading.Lock()
+
+        def send(index):
+            barrier.wait()
+            status, _ = case.post(PIN, make_key("k%02d" % index))
+            with lock:
+                statuses.append(status)
+
+        threads = [threading.Thread(target=send, args=(i,)) for i in range(12)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        lines = case.key_lines()
+    check("pair: one PIN accepts one concurrent request",
+          statuses.count(200) == 1 and len(lines) == 1, (statuses, lines))
+
+
+def test_surrogate_secrets():
+    with PairCase() as case:
+        status, body = case.post("\ud800", make_key("a"))
+    check("pair: a lone surrogate PIN answers JSON",
+          status in (400, 401) and body.get("ok") is False, (status, body))
+
+    service, tmp, keys, port_file = enroll_case(bind="127.0.0.1")
+    try:
+        service.start(port_file)
+        status, body = request(service.port, "/enroll",
+                               {"code": "\ud800", "key": make_key("a")})
+        check("enroll: a lone surrogate code answers JSON",
+              status in (400, 401) and body.get("ok") is False, (status, body))
+    finally:
+        service.stop()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_parallel_append():
+    tmp = tempfile.mkdtemp(prefix="herdr-append-")
+    path = os.path.join(tmp, "authorized_keys")
+    key = make_key("z")
+    barrier = threading.Barrier(40)
+    errors = []
+    lock = threading.Lock()
+
+    def append():
+        barrier.wait()
+        try:
+            hostlib.append_key(path, key)
+        except Exception as exc:  # noqa: BLE001 - report the test failure
+            with lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=append) for _ in range(40)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    lines = read_lines(path)
+    check("hostlib: parallel appends keep one key line",
+          len(lines) == 1 and not errors, (len(lines), errors))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_parse_rejects_trailing_blob_data():
+    key = make_key("t")
+    key_type, blob = key.split()
+    raw = base64.b64decode(blob) + b"trailing"
+    bad = "%s %s" % (key_type, base64.b64encode(raw).decode())
+    check("hostlib: a blob with trailing data is rejected",
+          hostlib.parse_key(bad) is None, bad)
+
+
 def test_pair_present_and_append():
     existing = make_key("x")
     fresh = make_key("y")
@@ -328,6 +443,35 @@ def test_enroll_limits():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_enroll_parallel_rate_limit():
+    service, tmp, keys, port_file = enroll_case(bind="127.0.0.1")
+    try:
+        service.start(port_file)
+        barrier = threading.Barrier(20)
+        statuses = []
+        lock = threading.Lock()
+
+        def send():
+            barrier.wait()
+            status, _ = request(service.port, "/enroll",
+                                {"code": "wrong", "key": make_key("a")})
+            with lock:
+                statuses.append(status)
+
+        threads = [threading.Thread(target=send) for _ in range(20)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        check("enroll: parallel wrong codes stop at five",
+              statuses.count(401) <= MAX_FAILS
+              and statuses.count(429) >= 20 - MAX_FAILS,
+              statuses)
+    finally:
+        service.stop()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_enroll_prefix():
     existing = make_key("x")
     blob = existing.split()[1]
@@ -364,6 +508,19 @@ def test_enroll_success_once():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_enroll_launcher_contract():
+    env = dict(os.environ)
+    env.pop("HERDR_ENROLL_BIND", None)
+    proc = subprocess.run(
+        ["bash", os.path.join(ROOT, "host", "enroll.sh"),
+         "--bind", "", "--quiet"],
+        env=env, capture_output=True, text=True)
+    check("enroll.sh: an empty bind is rejected",
+          proc.returncode == 2
+          and "bind needs a value" in (proc.stdout + proc.stderr),
+          (proc.returncode, proc.stdout, proc.stderr))
+
+
 def main():
     if not os.path.isfile(PAIR) or not os.path.isfile(ENROLL):
         print("pair.py or enroll.py not found under %s" % ROOT)
@@ -371,12 +528,20 @@ def main():
     test_pair_rate_limit()
     test_pair_non_ascii_pin()
     test_pair_exact_blob()
+    test_pair_restricted_existing()
+    test_pair_parallel_rate_limit()
+    test_pair_parallel_success()
+    test_surrogate_secrets()
+    test_parallel_append()
+    test_parse_rejects_trailing_blob_data()
     test_pair_present_and_append()
     test_enroll_bind()
     test_enroll_default_bind()
     test_enroll_limits()
+    test_enroll_parallel_rate_limit()
     test_enroll_prefix()
     test_enroll_success_once()
+    test_enroll_launcher_contract()
     print("")
     print("%d passed, %d failed" % (PASS, FAIL))
     return 0 if FAIL == 0 else 1

@@ -19,6 +19,7 @@ $excludeExact = @(
     ".editorconfig"
 )
 $excludePrefixes = @(
+    ".git/",
     ".audit/",
     ".github/",
     "dist/",

@@ -42,6 +42,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+[ -n "$BIND" ] || { echo "--bind needs a value"; exit 2; }
+
 command -v python3 >/dev/null 2>&1 || { echo "python3 is required"; exit 2; }
 [ -f "$SCRIPT_DIR/enroll.py" ] || { echo "enroll.py not found next to enroll.sh"; exit 2; }
 

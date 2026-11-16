@@ -217,18 +217,26 @@ fi
 # client. The local server and this watchdog are skipped for the same reason.
 PIDS=""
 for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
+    _comm="$(ps -o comm= -p "$_pid" 2>/dev/null)"
+    _comm="${_comm#"${_comm%%[! ]*}"}"
+    if [ "${_comm##*/}" != "herdr" ]; then
+        continue
+    fi
     _cmd="$(ps -o command= -p "$_pid" 2>/dev/null)"
     if [ -z "$_cmd" ]; then
         continue
     fi
-    _cmd="${_cmd#"${_cmd%%[! ]*}"}"
-    _argv0="${_cmd%% *}"
-    _rest="${_cmd#"$_argv0"}"
-    if [ "${_argv0##*/}" != "herdr" ]; then
-        continue
+    _rest="${_cmd#"$_comm"}"
+    _rest="${_rest#"${_rest%%[! ]*}"}"
+    if [ -n "$_rest" ]; then
+        _first="${_rest%% *}"
+        case "$_first" in
+            -h|--help|-V|--version) continue ;;
+            -*) : ;;
+            *) continue ;;
+        esac
     fi
-    case "$_rest" in
-        " server"*) continue ;;
+    case "$_cmd" in
         *"remote-client-bridge"*) continue ;;
         *"watchdog-macos.sh"*) continue ;;
     esac
@@ -290,8 +298,14 @@ if [ -z "$MACHINE" ]; then
     MACHINE="${HERDR_MACHINE:-}"
 fi
 if [ -z "$MACHINE" ]; then
-    _labels="$HOME/Library/Application Support/HerdrSetup/machines.txt"
-    if [ -f "$_labels" ]; then
+    _state="$HOME/Library/Application Support/HerdrSetup"
+    _last="$_state/last-machine.txt"
+    _labels="$_state/machines.txt"
+    if [ -f "$_last" ]; then
+        MACHINE="$(grep -v '^[[:space:]]*$' "$_last" 2>/dev/null | tail -n 1 | tr -d '\r')"
+        MACHINE="${MACHINE#"${MACHINE%%[! ]*}"}"
+        MACHINE="${MACHINE%"${MACHINE##*[! ]}"}"
+    elif [ -f "$_labels" ]; then
         MACHINE="$(grep -v '^[[:space:]]*$' "$_labels" 2>/dev/null | tail -n 1 | tr -d '\r')"
         MACHINE="${MACHINE#"${MACHINE%%[! ]*}"}"
         MACHINE="${MACHINE%"${MACHINE##*[! ]}"}"
@@ -304,13 +318,18 @@ if [ -z "$MACHINE" ]; then
     log "no machine label; relaunching without --machine"
 fi
 
-_esc="$(printf '%s' "$HERDR" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+_esc="$(_quote "$HERDR")"
 if [ -n "$MACHINE" ]; then
-    _m_esc="$(printf '%s' "$MACHINE" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
-    _launch="exec $_esc --machine \"$_m_esc\""
+    _m_esc="$(_quote "$MACHINE")"
+    _launch="exec $_esc --machine $_m_esc"
 else
     _launch="exec $_esc"
 fi
+_launch="$(printf '%s' "$_launch" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 
 if ! osascript -e 'tell application "Terminal" to do script "'"$_launch"'"' >/dev/null 2>&1; then
     log "osascript failed to open a Terminal window"

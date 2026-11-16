@@ -10,7 +10,15 @@ import base64
 import binascii
 import hmac
 import os
+import shlex
 import struct
+import threading
+from contextlib import contextmanager
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 # Key types that the services accept. The value is a prefix of the key type
 # token, so family types such as ecdsa-sha2-nistp256 also match.
@@ -24,6 +32,7 @@ KEY_PREFIXES = (
 
 MAX_KEY = 2000
 MIN_BLOB = 32
+APPEND_LOCK = threading.Lock()
 
 
 def parse_key(text):
@@ -49,15 +58,23 @@ def parse_key(text):
         raw = base64.b64decode(blob, validate=True)
     except (binascii.Error, ValueError):
         return None
-    if len(raw) < 8:
+    fields = []
+    pos = 0
+    while pos < len(raw):
+        if len(raw) - pos < 4:
+            return None
+        size = struct.unpack(">I", raw[pos:pos + 4])[0]
+        if size <= 0 or len(raw) - pos - 4 < size:
+            return None
+        fields.append(raw[pos + 4:pos + 4 + size])
+        pos += 4 + size
+    if len(fields) < 2:
         return None
-    size = struct.unpack(">I", raw[:4])[0]
-    if size <= 0 or len(raw) < 4 + size + 4:
+    try:
+        embedded_type = fields[0].decode("ascii")
+    except UnicodeDecodeError:
         return None
-    if raw[4:4 + size].decode("ascii", "replace") != key_type:
-        return None
-    key_len = struct.unpack(">I", raw[4 + size:8 + size])[0]
-    if key_len <= 0 or len(raw) < 8 + size + key_len:
+    if embedded_type != key_type or not fields[1]:
         return None
     return key_type, blob
 
@@ -65,9 +82,20 @@ def parse_key(text):
 def key_present(text, blob):
     """True when one line of this authorized_keys text carries exactly this blob."""
     for line in text.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] == blob:
-            return True
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = shlex.split(line, comments=False, posix=True)
+        except ValueError:
+            continue
+        for index in range(len(parts) - 1):
+            if not any(parts[index].startswith(prefix.rstrip())
+                       for prefix in KEY_PREFIXES):
+                continue
+            parsed = parse_key(parts[index] + " " + parts[index + 1])
+            if parsed is not None and parsed[1] == blob:
+                return True
     return False
 
 
@@ -76,6 +104,19 @@ def read_keys(path):
         return ""
     with open(path, "r", encoding="utf-8", errors="replace") as handle:
         return handle.read()
+
+
+@contextmanager
+def _file_lock(path):
+    with APPEND_LOCK:
+        with open(path, "a+", encoding="utf-8") as handle:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield handle
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def append_key(path, key):
@@ -91,17 +132,22 @@ def append_key(path, key):
 
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, mode=0o700, exist_ok=True)
-    existing = read_keys(path)
-
-    if key_present(existing, blob):
-        _chmod(path)
-        return True
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
 
     line = key.strip()
-    with open(path, "a", encoding="utf-8") as handle:
+    with _file_lock(path) as handle:
+        handle.seek(0)
+        existing = handle.read()
+        if key_present(existing, blob):
+            _chmod(path)
+            return True
         if existing and not existing.endswith("\n"):
             handle.write("\n")
         handle.write(line + "\n")
+        handle.flush()
     _chmod(path)
     return False
 
@@ -112,8 +158,10 @@ def secret_equals(supplied, expected):
     hmac.compare_digest raises TypeError when either text is not ASCII, which
     would kill the request handler before it sends a response.
     """
-    return hmac.compare_digest(str(supplied).encode("utf-8"),
-                               str(expected).encode("utf-8"))
+    return hmac.compare_digest(
+        str(supplied).encode("utf-8", "surrogatepass"),
+        str(expected).encode("utf-8", "surrogatepass"),
+    )
 
 
 def _chmod(path):

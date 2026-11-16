@@ -71,8 +71,9 @@ def write_text(path, text):
 
 def set_pin(pin):
     global PIN
-    PIN = pin
-    write_text(PIN_FILE, PIN + "\n")
+    with LOCK:
+        PIN = pin
+        write_text(PIN_FILE, PIN + "\n")
     print("", flush=True)
     print("  PIN: %s" % PIN, flush=True)
     print("", flush=True)
@@ -92,12 +93,33 @@ def append_key(key, name):
     return hostlib.append_key(path, key)
 
 
-def rate_limited(source):
+def check_attempt(source, supplied):
+    """Check and consume the PIN in one locked step."""
+    global PIN
     now = time.time()
     with LOCK:
         times = [t for t in FAILS.get(source, []) if now - t < 300]
+        if len(times) >= 5:
+            FAILS[source] = times
+            return "limited", None
+        if not hostlib.secret_equals(supplied, PIN):
+            times.append(now)
+            FAILS[source] = times
+            return "bad", None
+        claimed = PIN
+        PIN = ""
         FAILS[source] = times
-        return len(times) >= 5
+        return "ok", claimed
+
+
+def restore_pin(claimed):
+    global PIN
+    if not claimed:
+        return
+    with LOCK:
+        if not PIN:
+            PIN = claimed
+            write_text(PIN_FILE, PIN + "\n")
 
 
 def record_fail(source):
@@ -146,10 +168,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(404, {"ok": False, "error": "not found"})
 
         source = self.client_address[0]
-        if rate_limited(source):
-            log("deny source=%s reason=rate-limit" % source)
-            return self._json(429, {"ok": False, "error": "too many attempts"})
-
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > MAX_BODY:
@@ -162,18 +180,23 @@ class Handler(BaseHTTPRequestHandler):
         key = str(data.get("publicKey", "")).strip()
         name = sanitize(data.get("name", "client"))
 
-        if not hostlib.secret_equals(pin, PIN):
-            record_fail(source)
+        attempt, claimed = check_attempt(source, pin)
+        if attempt == "limited":
+            log("deny source=%s reason=rate-limit" % source)
+            return self._json(429, {"ok": False, "error": "too many attempts"})
+        if attempt == "bad":
             log("deny source=%s name=%s reason=bad-pin" % (source, name))
             return self._json(401, {"ok": False, "error": "bad pin"})
 
         if not valid_key(key):
+            restore_pin(claimed)
             log("deny source=%s name=%s reason=bad-key" % (source, name))
             return self._json(400, {"ok": False, "error": "bad key"})
 
         try:
             already = append_key(key, name)
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            restore_pin(claimed)
             log("error name=%s source=%s reason=%s" % (name, source, exc))
             return self._json(500, {"ok": False, "error": "cannot write keys"})
 
