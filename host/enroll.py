@@ -37,7 +37,7 @@ import os
 import sys
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import hostlib
 
@@ -85,6 +85,17 @@ def check_attempt(source: str, supplied: str) -> str:
 def record_fail(source: str) -> None:
     with LOCK:
         FAILS.setdefault(source, []).append(time.time())
+
+
+class EnrollServer(ThreadingHTTPServer):
+    """Concurrent server with a backlog that survives a parallel burst.
+
+    The default backlog of 5 refused connections when twenty clients asked at
+    once, which looked like a rate-limit reply of 0 to the caller.
+    """
+
+    daemon_threads = True
+    request_queue_size = 128
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -159,7 +170,7 @@ def main() -> int:
         print("HERDR_ENROLL_TOKEN is required", file=sys.stderr)
         return 2
 
-    server = HTTPServer((BIND, PORT), Handler)
+    server = EnrollServer((BIND, PORT), Handler)
     actual_port = server.server_address[1]
     if PORTFILE:
         try:

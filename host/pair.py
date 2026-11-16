@@ -190,6 +190,13 @@ def self_test():
     return 0
 
 
+class PairServer(ThreadingHTTPServer):
+    """Concurrent server with a backlog for a burst of reconnect attempts."""
+
+    daemon_threads = True
+    request_queue_size = 128
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "herdr-pair/1"
     timeout = 10
@@ -309,7 +316,7 @@ def main():
         return 2
 
     try:
-        SERVER = ThreadingHTTPServer((args.bind, args.port), Handler)
+        SERVER = PairServer((args.bind, args.port), Handler)
     except OSError as exc:
         print("cannot listen on %s:%s: %s" % (args.bind, args.port, exc),
               file=sys.stderr)
