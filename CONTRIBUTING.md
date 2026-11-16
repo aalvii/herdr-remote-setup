@@ -35,7 +35,9 @@ Run these before a pull request.
 python3 tools/check-public.py
 for f in $(git ls-files '*.sh' '*.command'); do bash -n "$f"; done
 ./host/install-desktop.sh
-desktop-file-validate ~/.local/share/applications/herdr-setup-app.desktop
+desktop-file-validate ~/.local/share/applications/herdr-remote-setup.desktop
+desktop-file-validate ~/.local/share/applications/herdr-share.desktop
+desktop-file-validate ~/.local/share/applications/herdr-new-client-code.desktop
 bash app/herdr-setup.sh --self-test
 bash client/setup-macos.sh --self-test
 ```

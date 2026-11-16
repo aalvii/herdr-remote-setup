@@ -52,8 +52,13 @@ jobs:
           ./host/install-desktop.sh
           desktop-file-validate host/Herdr-Provision.desktop
           desktop-file-validate app/Herdr-Setup.desktop
-          desktop-file-validate "$HOME/.local/share/applications/herdr-setup-app.desktop"
           desktop-file-validate "$HOME/.local/share/applications/herdr-remote-setup.desktop"
+          desktop-file-validate "$HOME/.local/share/applications/herdr-share.desktop"
+          desktop-file-validate "$HOME/.local/share/applications/herdr-new-client-code.desktop"
+          desktop-file-validate "$HOME/Desktop/herdr-remote-setup.desktop"
+          desktop-file-validate "$HOME/Desktop/herdr-share.desktop"
+          test ! -e "$HOME/.local/share/applications/herdr-setup-app.desktop"
+          test ! -e "$HOME/Desktop/herdr-setup-app.desktop"
 
   windows:
     runs-on: windows-latest

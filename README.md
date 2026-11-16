@@ -358,7 +358,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 │   ├── setup-gui.sh            # zenity wrapper
 │   ├── enroll.py               # advanced one-time key enrollment
 │   ├── enroll.sh               # enrollment launcher
-│   ├── install-desktop.sh      # menu entries and Desktop shortcut
+│   ├── install-desktop.sh      # menu entries and Desktop shortcuts
 │   └── install-autostart.sh    # boot-time Tailscale guard
 ├── client/
 │   ├── pair.ps1                # Windows PIN client

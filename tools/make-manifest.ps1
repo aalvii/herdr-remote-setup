@@ -34,7 +34,9 @@ $files = Get-ChildItem -Path $Root -Recurse -File |
         }
         (-not $skip) -and
         $rel -notlike "herdr-remote-setup-*.zip" -and
-        $rel -notlike "*.zip.tmp"
+        $rel -notlike "*.zip.tmp" -and
+        $rel -notlike "*.pyc" -and
+        $rel -notlike "*/__pycache__/*"
     } |
     Sort-Object FullName
 

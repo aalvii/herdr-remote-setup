@@ -1,5 +1,27 @@
 # Changelog
 
+## 4.0.1 - 2026-11-16
+
+Fix the host desktop entries.
+
+### Fixed
+
+- `host/install-desktop.sh` wrote a menu entry whose `Exec` pointed at
+  `setup-gui.sh`, which needs zenity. On a host without zenity the icon did
+  nothing. The entry now starts `app/launch-app.sh`, the Share / Connect /
+  Advanced menu.
+- The installer now writes `herdr-remote-setup.desktop`,
+  `herdr-share.desktop` (direct 6-digit PIN), and
+  `herdr-new-client-code.desktop` (Advanced), and removes the old duplicate
+  `herdr-setup-app.desktop`.
+- It now creates two Desktop shortcuts, **Herdr Remote Setup** and
+  **Herdr: Share This Computer**, and sets the GNOME trusted flag on both.
+- CI and `CONTRIBUTING.md` validate the new entry names, and CI fails if the
+  old duplicate is installed again.
+- `MANIFEST.sha256` no longer lists `host/__pycache__/*.pyc`. The file is
+  gitignored, so a fresh clone failed `verify-package.ps1` with `MISSING`.
+  `tools/make-manifest.ps1` now skips `*.pyc` and `__pycache__`.
+
 ## 4.0.0 - 2026-11-16
 
 Simple PIN pairing for non-IT users.
