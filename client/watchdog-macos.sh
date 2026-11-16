@@ -64,6 +64,10 @@ while [ $# -gt 0 ]; do
             ACTION="help"
             shift
             ;;
+        --self-test)
+            ACTION="selftest"
+            shift
+            ;;
         *)
             printf 'X unknown argument: %s\n' "$1" >&2
             exit "$EXIT_CANNOT"
@@ -77,6 +81,101 @@ case "$STALE_MINUTES" in
         exit "$EXIT_CANNOT"
         ;;
 esac
+
+classify_lines() {
+    STATE="unknown"
+    LAST_LINE=""
+    LINES_SEEN=0
+    while IFS= read -r _line; do
+        LINES_SEEN=1
+        case "$_line" in
+            *"handshake succeeded"*)
+                STATE="ok"
+                LAST_LINE="$_line"
+                ;;
+            *"did not acknowledge surface revocation"*|*"endpoint health check timed out"*)
+                STATE="stuck"
+                LAST_LINE="$_line"
+                ;;
+            *"endpoint transport failed"*|*"connection was lost"*)
+                STATE="fail"
+                LAST_LINE="$_line"
+                ;;
+        esac
+    done
+}
+
+is_client_command() {
+    case "$1" in
+        herdr|*/herdr) return 0 ;;
+        herdr\ --machine\ *|*/herdr\ --machine\ *) return 0 ;;
+        herdr\ --machine=*|*/herdr\ --machine=*) return 0 ;;
+    esac
+    return 1
+}
+
+self_test() {
+    failures=0
+
+    check() {
+        if [ "$2" -eq 0 ]; then
+            printf 'ok %s\n' "$1"
+        else
+            printf 'FAIL %s\n' "$1"
+            failures=$((failures + 1))
+        fi
+    }
+
+    classify_lines <<'EOF'
+client started normally
+EOF
+    check "benign log is unknown" "$([ "$STATE" = "unknown" ] && echo 0 || echo 1)"
+    check "benign log is not a restart" "$([ "$STATE" != "stuck" ] && [ "$STATE" != "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+handshake succeeded
+EOF
+    check "healthy log is ok" "$([ "$STATE" = "ok" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+did not acknowledge surface revocation
+EOF
+    check "revocation is stuck" "$([ "$STATE" = "stuck" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+connection was lost
+EOF
+    check "transport failure is fail" "$([ "$STATE" = "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+handshake succeeded
+connection was lost
+EOF
+    check "last failure wins" "$([ "$STATE" = "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+connection was lost
+handshake succeeded
+EOF
+    check "recovery wins" "$([ "$STATE" = "ok" ] && echo 0 || echo 1)"
+
+    is_client_command "herdr"; check "bare client matches" "$?"
+    is_client_command "/Users/alice/.local/bin/herdr --machine box"; check "client path matches" "$?"
+    is_client_command "herdr status"; check "status command is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "herdr machine status"; check "machine command is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "herdr server"; check "server is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "herdr remote-client-bridge"; check "bridge is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "herdr-core connect"; check "herdr-core is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "ssh -T vii@host exec herdr-core connect"; check "ssh helper is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    is_client_command "node /tmp/herdr-review.mjs"; check "review job is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+
+    if [ "$failures" -ne 0 ]; then
+        printf 'self-test failed (%d)\n' "$failures"
+        return 1
+    fi
+    printf 'SELFTEST OK (watchdog state gate; TUI client match)\n'
+    return 0
+}
 
 if [ "$ACTION" = "help" ]; then
     cat <<'EOF'
@@ -93,6 +192,11 @@ Usage:
 Exit codes: 0 healthy, 2 cannot evaluate, 10 restarted, 11 dry run
 EOF
     exit "$EXIT_OK"
+fi
+
+if [ "$ACTION" = "selftest" ]; then
+    self_test
+    exit $?
 fi
 
 LOG_DIR="$HOME/Library/Logs/HerdrSetup"
@@ -140,29 +244,11 @@ if [ ! -f "$CLIENT_LOG" ]; then
     exit "$EXIT_CANNOT"
 fi
 
-state="unknown"
-last_line=""
-seen=0
+classify_lines < <(tail -n 120 "$CLIENT_LOG" 2>/dev/null)
+state="$STATE"
+last_line="$LAST_LINE"
 
-while IFS= read -r _l; do
-    seen=1
-    case "$_l" in
-        *"handshake succeeded"*)
-            state="ok"
-            last_line="$_l"
-            ;;
-        *"did not acknowledge surface revocation"*|*"endpoint health check timed out"*)
-            state="stuck"
-            last_line="$_l"
-            ;;
-        *"endpoint transport failed"*|*"connection was lost"*)
-            state="fail"
-            last_line="$_l"
-            ;;
-    esac
-done < <(tail -n 120 "$CLIENT_LOG" 2>/dev/null)
-
-if [ "$seen" -eq 0 ]; then
+if [ "$LINES_SEEN" -eq 0 ]; then
     log "client log is empty"
     exit "$EXIT_OK"
 fi
@@ -181,7 +267,8 @@ _age_min=$(( _age_sec / 60 ))
 
 log "state=$state logAge=${_age_min}min last=${last_line}"
 
-if [ "$state" = "ok" ]; then
+if [ "$state" = "ok" ] || [ "$state" = "unknown" ]; then
+    log "no failure state; waiting"
     exit "$EXIT_OK"
 fi
 
@@ -191,19 +278,33 @@ if [ "$_age_sec" -lt "$_stale_sec" ]; then
     exit "$EXIT_OK"
 fi
 
+HERDR=""
+if command -v herdr >/dev/null 2>&1; then
+    HERDR="$(command -v herdr)"
+else
+    for _p in "$HOME/.local/bin/herdr" /opt/homebrew/bin/herdr /usr/local/bin/herdr; do
+        if [ -x "$_p" ]; then
+            HERDR="$_p"
+            break
+        fi
+    done
+fi
+if [ -z "$HERDR" ]; then
+    log "herdr not found"
+    exit "$EXIT_CANNOT"
+fi
+
 # Find the TUI client only: the local server, the remote bridge, and this
 # watchdog must never be stopped.
 PIDS=""
-for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
+for _pid in $(pgrep -f 'herdr($| )' 2>/dev/null); do
     _cmd="$(ps -o command= -p "$_pid" 2>/dev/null)"
     if [ -z "$_cmd" ]; then
         continue
     fi
-    case "$_cmd" in
-        *"herdr server"*) continue ;;
-        *"remote-client-bridge"*) continue ;;
-        *"watchdog-macos.sh"*) continue ;;
-    esac
+    if ! is_client_command "$_cmd"; then
+        continue
+    fi
     PIDS="$PIDS $_pid"
 done
 PIDS="${PIDS# }"
@@ -233,22 +334,6 @@ for _pid in $PIDS; do
 done
 
 sleep 3
-
-HERDR=""
-if command -v herdr >/dev/null 2>&1; then
-    HERDR="$(command -v herdr)"
-else
-    for _p in "$HOME/.local/bin/herdr" /opt/homebrew/bin/herdr /usr/local/bin/herdr; do
-        if [ -x "$_p" ]; then
-            HERDR="$_p"
-            break
-        fi
-    done
-fi
-if [ -z "$HERDR" ]; then
-    log "herdr not found"
-    exit "$EXIT_CANNOT"
-fi
 
 # A TUI needs a console, and this watchdog runs from launchd with no terminal.
 # Terminal opens a window and runs the client; osascript must exist beforehand.

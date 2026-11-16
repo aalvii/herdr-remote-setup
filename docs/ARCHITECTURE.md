@@ -108,7 +108,8 @@ host/pair.sh                          app Herdr-Setup.cmd
   only the missing entries, writes the full policy back with `POST /acl`, then
   reads it again and checks the result. It backs up the original policy under
   `/etc/herdr-setup` before any write, and it refuses to write when the policy is
-  unparsable or has an unexpected shape. `--no-acl-write` verifies only.
+  unparsable, has an unexpected shape, or gives `tag:client` a destination other
+  than `tag:herdr-host`. `--no-acl-write` verifies only.
 - The policy may be HuJSON, with comments and trailing commas. The script parses
   it, merges the missing entries, and posts strict JSON. A comment that is lost
   in that conversion is recoverable from the backup.
@@ -216,9 +217,14 @@ and restart only the client:
 ```
 read last 120 lines of the client log
 last event == failure (revocation / health check) and log idle > stale minutes
-  -> stop the client process (command line without " server")
+  -> stop only the herdr TUI command, not the server or the bridge
   -> relaunch with a console
 ```
+
+A state of `unknown` is not a failure. Both watchdogs treat it as healthy and do
+nothing. Both process matchers accept only `herdr` or `herdr --machine`.
+This excludes `herdr status`, `herdr machine status`, `herdr-core`, the SSH
+helper, and other jobs with `herdr` in their path.
 
 A TUI needs an interactive console. On Windows,
 `Start-Process` and `cmd /c start` from a non-console context exit immediately;
@@ -367,6 +373,8 @@ Client (macOS):
 
 - No password bootstrap. The recommended setup disables password auth.
 - No silent elevation on Windows.
-- No automatic ACL editing. The tailnet policy stays operator-owned.
+- ACL editing is automatic only when the operator stores a root-only API token.
+  Without the token, the host prints the required snippet and the policy stays
+  operator-owned. `--no-acl-write` forces the check-only path.
 - `ts-ssh` depends on the operator keeping node tags correct; the autostart unit
   reduces, but cannot remove, that dependency.

@@ -263,7 +263,8 @@ HERDR_CLIENT_LOG="$HOME/Library/Application Support/herdr/herdr-client.log" \
 ```
 
 Then put the same path in the LaunchAgent `ProgramArguments` or the environment.
-The watchdog never guesses and never restarts a healthy client.
+The watchdog never guesses and never restarts a healthy client. An `unknown`
+state is healthy. It acts only on a `stuck` or `fail` event.
 
 The watchdog reopens Terminal through `osascript`. macOS may ask for Automation
 permission the first time. Allow it, or restart the client by hand.

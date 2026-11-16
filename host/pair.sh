@@ -154,10 +154,10 @@ elif ! "$TS" status --json 2>/dev/null | grep -q 'tag:herdr-host'; then
 else
   ENSURE_ARGS=()
   [ "$NO_ACL_WRITE" -eq 1 ] && ENSURE_ARGS+=(--no-acl-write)
-  run_root bash "$SCRIPT_DIR/ensure-acl.sh" ${ENSURE_ARGS[@]+"${ENSURE_ARGS[@]}"}
+  run_root bash "$SCRIPT_DIR/ensure-acl.sh" --port "$PORT" ${ENSURE_ARGS[@]+"${ENSURE_ARGS[@]}"}
   ACL_RC=$?
   if [ "$ACL_RC" -eq 2 ]; then
-    echo "! No Tailscale API token. PIN-only; the guest must already be on the tailnet."
+    echo "! ACL check could not run. PIN-only; the guest must already be on the tailnet."
     JOIN_STATE="no-token"
   elif [ "$ACL_RC" -ne 0 ]; then
     echo "! The tailnet ACL is not ready. PIN-only for now."
