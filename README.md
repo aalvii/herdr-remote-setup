@@ -392,6 +392,9 @@ bash app/herdr-setup.sh --self-test
 
 - The connection code is base64, not encryption. It can carry a Tailscale auth
   key. Treat it as a secret.
+- The setup CLIs and the Windows app pass the code to a child process as a
+  command-line argument. A local administrator can see it in the process list
+  while the setup runs.
 - Use single-use, short-expiry auth keys for clients.
 - `ts-ssh` removes key sprawl but relies on the ACL. Use `action: accept` only
   with a narrow `src`/`dst`/`users` tuple.
