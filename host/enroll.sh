@@ -55,7 +55,7 @@ printf 'bind=%s\nport=%s\ntoken=%s\nstarted=%s\nttl=%s\n' "$BIND" "$PORT" "$TOKE
   > "$STATE_DIR/enroll.txt" 2>/dev/null || true
 chmod 600 "$STATE_DIR/enroll.txt" 2>/dev/null || true
 
-[ "$QUIET" -eq 1 ] || echo "ENROLL_BIND=$BIND ENROLL_PORT=$PORT TTL=$TTL"
+[ "$QUIET" -eq 1 ] || echo "ENROLL_BIND=$BIND ENROLL_PORT=$PORT ENROLL_TOKEN=$TOKEN TTL=$TTL"
 
 HERDR_ENROLL_TOKEN="$TOKEN" \
 HERDR_ENROLL_BIND="$BIND" \

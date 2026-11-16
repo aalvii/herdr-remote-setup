@@ -13,6 +13,7 @@ $out = Join-Path $Root "MANIFEST.sha256"
 
 $excludeExact = @(
     "MANIFEST.sha256",
+    ".git",
     ".gitignore",
     ".gitattributes",
     ".editorconfig"
