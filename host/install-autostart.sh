@@ -155,10 +155,20 @@ chmod 644 "$UNIT"
 systemctl daemon-reload >/dev/null 2>&1 || true
 systemctl enable herdr-tailscale-ssh.service >/dev/null 2>&1 || true
 
+# A failed enable used to print "Enabled" anyway, so a unit that systemd refused
+# to load looked installed. Ask systemd for the real state and report that.
+ENABLED="unknown"
+if command -v systemctl >/dev/null 2>&1; then
+  ENABLED="$(systemctl is-enabled herdr-tailscale-ssh.service 2>/dev/null || true)"
+fi
+
 echo "Installed: $ENV_FILE (600)"
 echo "Installed: $GUARD (755)"
 echo "Installed: $UNIT"
-echo "Enabled:   herdr-tailscale-ssh.service"
+case "$ENABLED" in
+  enabled) echo "Enabled:   herdr-tailscale-ssh.service" ;;
+  *) echo "! Not enabled: herdr-tailscale-ssh.service (systemctl is-enabled said: ${ENABLED:-nothing})" ;;
+esac
 echo ""
 echo "Test now:  sudo systemctl start herdr-tailscale-ssh.service && systemctl status herdr-tailscale-ssh.service --no-pager"
 echo "Note: the auth key is stored on disk (root only). Rotate it if it leaks."

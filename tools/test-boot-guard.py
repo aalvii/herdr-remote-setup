@@ -21,6 +21,7 @@ Exit codes: 0 all cases passed, 1 a case failed, 2 the harness could not run.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -187,6 +188,13 @@ def main():
         rc, out, called = guard.run(RUNNING, PREFS_OFF, ssh="1")
         check("guard: missing SSH support triggers a re-assert",
               rc == 0 and len(called) == 1, (rc, called, out))
+
+        check("installer: asks systemd for the real enable state",
+              "is-enabled herdr-tailscale-ssh.service" in installer,
+              "no systemctl is-enabled call")
+        check("installer: does not print Enabled without a check",
+              not re.search(r'^echo "Enabled:', installer, re.M),
+              "unconditional Enabled line still present")
 
         rc, out, called = guard.run(RUNNING, PREFS_ON, tag="")
         check("guard: no stored tag means no tag check", rc == 0 and not called,
