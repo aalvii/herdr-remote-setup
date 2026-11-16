@@ -362,6 +362,7 @@ The client prefers `dns`, then falls back to each address in `ips`.
 │   └── uninstall.ps1
 ├── docs/
 │   ├── QUICKSTART.md
+│   ├── SETUP-A-AND-B.md
 │   ├── ARCHITECTURE.md
 │   ├── ACCESS-MODEL.md
 │   ├── acl-policy.hujson
@@ -411,6 +412,7 @@ bash app/herdr-setup.sh --self-test
 
 ## 9. More
 
+- `docs/SETUP-A-AND-B.md` — two-machine runbook for Host A and Machine B
 - `docs/QUICKSTART.md` — one-page end-to-end flow
 - `docs/ACCESS-MODEL.md` — operator / client / herdr-host roles, tagging, ACL
 - `docs/acl-policy.hujson` — paste-ready tailnet policy

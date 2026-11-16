@@ -2,11 +2,13 @@
 
 One page: from a fresh host and a fresh client to a working herdr remote
 session. Hosts: Linux or macOS. Clients: Windows or macOS. Version: see
-`VERSION` (currently 3.1.1).
+`VERSION` (currently 3.1.2).
 
 For the no-command-line path, open `app/` first: `Herdr-Setup.cmd` on Windows,
 `Herdr-Setup.command` on macOS, or `Herdr-Setup.desktop` on Linux. Pick Role
 and OS. The rest of this page is the same flow with the commands shown.
+
+For a two-machine walkthrough, see `docs/SETUP-A-AND-B.md`.
 
 ---
 

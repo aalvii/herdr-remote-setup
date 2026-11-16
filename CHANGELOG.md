@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.1.2 - 2026-11-15
+
+Add the two-machine runbook.
+
+### Added
+
+- `docs/SETUP-A-AND-B.md`: end-to-end instructions for Host A and Machine B,
+  including the supported pairs, auth key rules, launchers, verification,
+  troubleshooting, and security rules.
+
+### Changed
+
+- README and QUICKSTART link the new page.
+- `VERSION` is 3.1.2.
+
+---
+
 ## 3.1.1 - 2026-11-15
 
 Restore the portable double-click launchers.
