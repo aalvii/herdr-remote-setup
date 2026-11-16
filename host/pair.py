@@ -19,10 +19,12 @@ Security:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
 import secrets
+import struct
 import sys
 import threading
 import time
@@ -83,11 +85,23 @@ def valid_key(key):
     return hostlib.parse_key(key) is not None
 
 
+def valid_pin(pin):
+    return isinstance(pin, str) and re.fullmatch(r"[0-9]{6}", pin) is not None
+
+
+def compare_pin(pin):
+    if not valid_pin(pin) or not valid_pin(PIN):
+        return False
+    return hostlib.secret_equals(pin, PIN)
+
+
 def sanitize(value, limit=64):
     value = re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or "client"))
     return value[:limit] or "client"
 
 
+def append_key(key, name):
+    path = os.path.expanduser(ARGS.authorized_keys)
 def append_key(key, name):
     path = os.path.expanduser(ARGS.authorized_keys)
     return hostlib.append_key(path, key)
@@ -122,13 +136,63 @@ def restore_pin(claimed):
             write_text(PIN_FILE, PIN + "\n")
 
 
+def record_fail_locked(source):
+    FAILS.setdefault(source, []).append(time.time())
+
+
 def record_fail(source):
     with LOCK:
-        FAILS.setdefault(source, []).append(time.time())
+        record_fail_locked(source)
+
+
+def _test_key(key_type):
+    material = b"k" * 32
+    inner = (struct.pack(">I", len(key_type)) + key_type.encode()
+             + struct.pack(">I", len(material)) + material)
+    return "%s %s" % (key_type, base64.b64encode(inner).decode())
+
+
+def self_test():
+    global PIN
+    failures = 0
+
+    def check(name, condition):
+        nonlocal failures
+        if condition:
+            print("ok %s" % name)
+        else:
+            failures += 1
+            print("FAIL %s" % name)
+
+    fake_key = _test_key("ssh-ed25519")
+    check("valid pin", valid_pin("123456"))
+    check("short pin", not valid_pin("12345"))
+    check("non-digit pin", not valid_pin("12345a"))
+    check("non-ascii pin", not valid_pin("é"))
+    check("valid key", valid_key(fake_key))
+    check("key with internal newline",
+          not valid_key(fake_key[:30] + chr(10) + fake_key[30:]))
+    check("rsa key", valid_key(_test_key("ssh-rsa")))
+    check("truncated key", not valid_key(fake_key[:40]))
+    check("name is sanitized", sanitize("a/b c") == "a_b_c")
+
+    old_pin = PIN
+    PIN = "123456"
+    check("pin match", compare_pin("123456"))
+    check("pin miss", not compare_pin("654321"))
+    check("non-ascii compare", not compare_pin("é"))
+    PIN = old_pin
+
+    if failures:
+        print("self-test failed (%d)" % failures)
+        return 1
+    print("self-test ok")
+    return 0
 
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "herdr-pair/1"
+    timeout = 10
 
     def _json(self, status, payload):
         body = json.dumps(payload).encode("utf-8")
@@ -175,6 +239,8 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             return self._json(400, {"ok": False, "error": "bad json"})
+        if not isinstance(data, dict):
+            return self._json(400, {"ok": False, "error": "bad json"})
 
         pin = str(data.get("pin", ""))
         key = str(data.get("publicKey", "")).strip()
@@ -200,15 +266,15 @@ class Handler(BaseHTTPRequestHandler):
             log("error name=%s source=%s reason=%s" % (name, source, exc))
             return self._json(500, {"ok": False, "error": "cannot write keys"})
 
+        if not ARGS.once:
+            set_pin(new_pin())
+
         log("paired name=%s source=%s result=%s" % (
             name, source, "already-present" if already else "added"))
-
         self._json(200, {"ok": True, "alreadyPresent": already})
 
         if ARGS.once:
             threading.Thread(target=SERVER.shutdown, daemon=True).start()
-        else:
-            set_pin(new_pin())
 
 
 def main():
@@ -221,12 +287,16 @@ def main():
     parser.add_argument("--pin", default="")
     parser.add_argument("--ttl", type=int, default=1800)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--state-dir", default=os.path.expanduser(
         "~/.local/state/herdr-setup"))
     parser.add_argument("--authorized-keys", default=os.path.expanduser(
         "~/.ssh/authorized_keys"))
     args = parser.parse_args()
     ARGS = args
+
+    if args.self_test:
+        return self_test()
 
     os.makedirs(args.state_dir, exist_ok=True)
     PIN_FILE = os.path.join(args.state_dir, "pair.pin")

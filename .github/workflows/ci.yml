@@ -43,6 +43,7 @@ jobs:
           bash host/setup.sh --version
           bash host/provision.sh --version
           bash host/pair.sh --help
+          python3 host/pair.py --self-test
           bash host/ensure-acl.sh --self-test
           bash host/guest-key.sh --self-test
           bash app/herdr-setup.sh --self-test
@@ -53,6 +54,9 @@ jobs:
 
       - name: Boot guard
         run: python3 tools/test-boot-guard.py
+
+      - name: Pairing service tests
+        run: python3 tools/test-pair.py
 
       - name: Mock Tailscale API
         run: bash tools/test-ts-api.sh
@@ -91,6 +95,10 @@ jobs:
         shell: powershell
         run: .\client\pair.ps1 -SelfTest
 
+      - name: Watchdog self-test
+        shell: powershell
+        run: .\client\watchdog.ps1 -SelfTest
+
       - name: Pair client join code self-test
         shell: powershell
         run: |
@@ -122,6 +130,9 @@ jobs:
 
       - name: App self-test
         run: bash app/herdr-setup.sh --self-test
+
+      - name: Watchdog self-test
+        run: bash client/watchdog-macos.sh --self-test
 
       - name: Shell syntax
         run: |

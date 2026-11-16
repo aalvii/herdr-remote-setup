@@ -13,6 +13,7 @@
 # Usage:
 #   ./ensure-acl.sh                 ensure and verify
 #   ./ensure-acl.sh --no-acl-write  verify only, never write
+#   ./ensure-acl.sh --port 9000     use a non-default pairing port
 #   ./ensure-acl.sh --self-test     run the fixtures, no network
 #
 # Exit codes:
@@ -37,17 +38,33 @@ KEY_FILE="${HERDR_TS_API_KEY_FILE:-/etc/herdr-setup/tailscale-api.key}"
 API_URL="${HERDR_TS_API_URL:-https://api.tailscale.com/api/v2}"
 TAILNET="${HERDR_TS_TAILNET:--}"
 BACKUP_DIR="${HERDR_ACL_BACKUP_DIR:-/etc/herdr-setup}"
+PORT="${HERDR_PAIR_PORT:-8765}"
 
 MODE="ensure"
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-acl-write) MODE="verify" ;;
     --self-test) MODE="self-test" ;;
+    --port)
+      if [ $# -lt 2 ]; then echo "X --port needs a value" >&2; exit 2; fi
+      PORT="$2"
+      shift
+      ;;
+    --port=*) PORT="${1#--port=}" ;;
     --help|-h) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "X unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
+
+case "$PORT" in
+  ''|*[!0-9]*) echo "X --port must be a number" >&2; exit 2 ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  echo "X --port must be between 1 and 65535" >&2
+  exit 2
+fi
+export HERDR_PAIR_PORT="$PORT"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "X python3 is required (macOS: xcode-select --install)" >&2
@@ -71,6 +88,7 @@ import base64
 import json
 import os
 import re
+import stat
 import sys
 import time
 import urllib.error
@@ -80,10 +98,11 @@ API = os.environ.get("HERDR_TS_API_URL", "https://api.tailscale.com/api/v2").rst
 TAILNET = os.environ.get("HERDR_TS_TAILNET", "-")
 KEY_FILE = os.environ.get("HERDR_TS_API_KEY_FILE", "/etc/herdr-setup/tailscale-api.key")
 BACKUP_DIR = os.environ.get("HERDR_ACL_BACKUP_DIR", "/etc/herdr-setup")
+PORT = int(os.environ.get("HERDR_PAIR_PORT", "8765"))
 
 GUEST_TAG = "tag:client"
 HOST_TAG = "tag:herdr-host"
-PORTS = ("tcp:22", "tcp:8765")
+PORTS = ("tcp:22", "tcp:%d" % PORT)
 
 SNIPPET = {
     "tagOwners": {GUEST_TAG: ["autogroup:admin"]},
@@ -127,7 +146,42 @@ def strip_hujson(text):
             continue
         out.append(char)
         i += 1
-    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+    return strip_trailing_commas_outside_strings("".join(out))
+
+
+def strip_trailing_commas_outside_strings(text):
+    out = []
+    i = 0
+    n = len(text)
+    in_string = False
+    escaped = False
+    while i < n:
+        char = text[i]
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            i += 1
+            continue
+        if char == '"':
+            in_string = True
+            out.append(char)
+            i += 1
+            continue
+        if char == ",":
+            j = i + 1
+            while j < n and text[j] in " \t\r\n":
+                j += 1
+            if j < n and text[j] in "}]":
+                i += 1
+                continue
+        out.append(char)
+        i += 1
+    return "".join(out)
 
 
 def parse_policy(text):
@@ -139,6 +193,36 @@ def port_of_dst(value):
     if not isinstance(value, str) or ":" not in value:
         return ""
     return value.rsplit(":", 1)[1]
+
+
+def dst_matches_host(value):
+    if not isinstance(value, str):
+        return False
+    if value == HOST_TAG:
+        return True
+    return value.startswith(HOST_TAG + ":")
+
+
+def unsafe_guest_destinations(policy):
+    issues = []
+    for section, allow_host_tag in (("grants", True), ("acls", False)):
+        entries = policy.get(section)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict) or GUEST_TAG not in (entry.get("src") or []):
+                continue
+            destinations = entry.get("dst") or []
+            if not isinstance(destinations, list):
+                destinations = [destinations]
+            for dest in destinations:
+                if (allow_host_tag and dest == HOST_TAG) or (not allow_host_tag and dst_matches_host(dest)):
+                    continue
+                issues.append(
+                    "%s gives %s destination %s; only %s is allowed"
+                    % (section, GUEST_TAG, dest, HOST_TAG)
+                )
+    return issues
 
 
 def grant_entries(policy):
@@ -184,7 +268,11 @@ def missing_entries(policy):
             if GUEST_TAG not in (entry.get("src") or []):
                 continue
             for dest in entry.get("dst") or []:
-                reached.add(port_of_dst(dest))
+                if not dst_matches_host(dest):
+                    continue
+                port = port_of_dst(dest)
+                if port:
+                    reached.add(port)
         for port in PORTS:
             if "*" not in reached and port.split(":")[1] not in reached:
                 problems.append("acls has no %s -> %s on %s" % (GUEST_TAG, HOST_TAG, port))
@@ -230,7 +318,11 @@ def merge_entries(policy, problems):
         for entry in merged["acls"]:
             if isinstance(entry, dict) and GUEST_TAG in (entry.get("src") or []):
                 for dest in entry.get("dst") or []:
-                    reached.add(port_of_dst(dest))
+                    if not dst_matches_host(dest):
+                        continue
+                    port = port_of_dst(dest)
+                    if port:
+                        reached.add(port)
         want = [
             "%s:%s" % (HOST_TAG, port.split(":")[1])
             for port in PORTS
@@ -248,9 +340,31 @@ def merge_entries(policy, problems):
     return merged, added
 
 
+def key_file_layout_ok(mode, uid, euid):
+    if mode & 0o077:
+        return False
+    if euid == 0 and uid != 0:
+        return False
+    return True
+
+
 def read_key():
-    with open(KEY_FILE, "r", encoding="utf-8") as handle:
-        return handle.read().strip()
+    try:
+        with open(KEY_FILE, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            mode = stat.S_IMODE(info.st_mode)
+            if not key_file_layout_ok(mode, info.st_uid, os.geteuid()):
+                if mode & 0o077:
+                    print("! the API token file is readable by group or others")
+                    print("  Run: sudo chmod 600 %s" % KEY_FILE)
+                else:
+                    print("! the API token file is not owned by root")
+                    print("  Run: sudo chown root:root %s" % KEY_FILE)
+                return ""
+            return handle.read().decode("utf-8").strip()
+    except OSError as error:
+        print("! cannot read the API token: %s" % error)
+        return ""
 
 
 def call(method, path, body=None, key=""):
@@ -291,6 +405,8 @@ def backup(text):
 
 def run(mode):
     key = read_key()
+    if not key:
+        return 2
     status, text = call("GET", "acl", key=key)
     if status in (401, 403):
         print("! the API token cannot read the policy (HTTP %d)" % status)
@@ -308,6 +424,21 @@ def run(mode):
     except ValueError as error:
         print("! the policy cannot be parsed: %s" % error)
         print("  Nothing was written. The policy is unchanged.")
+        print_snippet()
+        return 3
+
+    if not isinstance(policy, dict):
+        print("! the policy must be a JSON object")
+        print("  Nothing was written. The policy is unchanged.")
+        print_snippet()
+        return 3
+
+    unsafe = unsafe_guest_destinations(policy)
+    if unsafe:
+        for issue in unsafe:
+            print("! " + issue)
+        print("! the policy contains a guest rule that is not host-specific")
+        print("  The script does not remove existing rules. Remove or narrow it, then rerun.")
         print_snippet()
         return 3
 
@@ -384,7 +515,7 @@ def self_test():
 
     ready = {
         "tagOwners": {"tag:client": ["autogroup:admin"], "tag:herdr-host": ["autogroup:admin"]},
-        "grants": [{"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", "tcp:8765"]}],
+        "grants": [{"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", PORTS[1]]}],
         "hosts": {"nas": "100.64.0.5"},
         "ssh": [{"action": "check", "src": ["autogroup:member"], "dst": ["tag:herdr-host"], "users": ["box"]}],
     }
@@ -397,12 +528,12 @@ def self_test():
         "ssh": [{"action": "check", "src": ["autogroup:member"], "dst": ["tag:herdr-host"], "users": ["box"]}],
     }
     problems = missing_entries(empty)
-    check("missing grant port is reported", any("tcp:8765" in item for item in problems))
+    check("missing grant port is reported", any(PORTS[1] in item for item in problems))
     check("missing tag owner is reported", any("tagOwners" in item for item in problems))
 
     merged, added = merge_entries(empty, problems)
     check("merge adds the tag owner", merged["tagOwners"][GUEST_TAG] == ["autogroup:admin"])
-    check("merge adds the missing port", "tcp:8765" in merged["grants"][0]["ip"])
+    check("merge adds the missing port", PORTS[1] in merged["grants"][0]["ip"])
     check("merge keeps the other port", "tcp:22" in merged["grants"][0]["ip"])
     check("merge keeps hosts", merged["hosts"] == empty["hosts"])
     check("merge keeps ssh", merged["ssh"] == empty["ssh"])
@@ -425,19 +556,56 @@ def self_test():
     check("legacy policy gets a guest acl", len(merged["acls"]) == 2)
     check("legacy guest acl names both ports", merged["acls"][1]["dst"] == [
         "tag:herdr-host:22",
-        "tag:herdr-host:8765",
+        "tag:herdr-host:%d" % PORT,
     ])
     check("legacy policy is ready after merge", missing_entries(merged) == [])
     check("legacy merge keeps the old acl", merged["acls"][0]["src"] == ["autogroup:member"])
+
+    legacy_wrong = {
+        "tagOwners": {"tag:client": ["autogroup:admin"]},
+        "acls": [
+            {"action": "accept", "src": ["tag:client"],
+             "dst": ["tag:other:22", "tag:other:%d" % PORT]},
+        ],
+    }
+    problems = missing_entries(legacy_wrong)
+    check("wrong acl destination is reported", any(HOST_TAG in item for item in problems))
+    check("wrong acl destination is unsafe", bool(unsafe_guest_destinations(legacy_wrong)))
+
+    legacy_wildcard = {
+        "tagOwners": {"tag:client": ["autogroup:admin"]},
+        "acls": [
+            {"action": "accept", "src": ["tag:client"],
+             "dst": ["*:22", "*:%d" % PORT]},
+        ],
+    }
+    problems = missing_entries(legacy_wildcard)
+    check("wildcard acl does not count as host-specific", any(HOST_TAG in item for item in problems))
+    check("wildcard acl is unsafe", bool(unsafe_guest_destinations(legacy_wildcard)))
+
+    unsafe_grant = {
+        "grants": [{"src": [GUEST_TAG], "dst": ["*"], "ip": ["tcp:22"]}],
+    }
+    check("wildcard grant is unsafe", bool(unsafe_guest_destinations(unsafe_grant)))
+
+    hujson_string = '{"note": "keep ,} here", "n": 1,}'
+    parsed = parse_policy(hujson_string)
+    check("hujson keeps commas in strings", parsed["note"] == "keep ,} here")
+    check("hujson removes trailing commas", parsed["n"] == 1)
+
+    check("group-readable token is refused", not key_file_layout_ok(0o644, 1000, 0))
+    check("mode 600 token is accepted", key_file_layout_ok(0o600, 0, 0))
+    check("non-root token owner is refused", not key_file_layout_ok(0o600, 1000, 0))
+    check("user token is accepted outside root", key_file_layout_ok(0o600, 1000, 1000))
 
     hujson = """{
   // guest devices
   "tagOwners": {"tag:client": ["autogroup:admin"],},
   "grants": [
-    {"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", "tcp:8765"],},
+    {"src": ["tag:client"], "dst": ["tag:herdr-host"], "ip": ["tcp:22", "tcp:%d"],},
   ],
   "hosts": {"nas": "100.64.0.5"},
-}"""
+}""" % PORT
     parsed = parse_policy(hujson)
     check("hujson comments and trailing commas parse", parsed["hosts"]["nas"] == "100.64.0.5")
     check("hujson policy is ready", missing_entries(parsed) == [])

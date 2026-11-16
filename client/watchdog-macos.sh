@@ -82,6 +82,10 @@ while [ $# -gt 0 ]; do
             ACTION="help"
             shift
             ;;
+        --self-test)
+            ACTION="selftest"
+            shift
+            ;;
         *)
             printf 'X unknown argument: %s\n' "$1" >&2
             exit "$EXIT_CANNOT"
@@ -95,6 +99,136 @@ case "$STALE_MINUTES" in
         exit "$EXIT_CANNOT"
         ;;
 esac
+
+classify_lines() {
+    STATE="unknown"
+    LAST_LINE=""
+    LINES_SEEN=0
+    while IFS= read -r _line; do
+        LINES_SEEN=1
+        case "$_line" in
+            *"handshake succeeded"*)
+                STATE="ok"
+                LAST_LINE="$_line"
+                ;;
+            *"did not acknowledge surface revocation"*|*"endpoint health check timed out"*)
+                STATE="stuck"
+                LAST_LINE="$_line"
+                ;;
+            *"endpoint transport failed"*|*"connection was lost"*)
+                STATE="fail"
+                LAST_LINE="$_line"
+                ;;
+        esac
+    done
+}
+
+# Return true only for arguments that launch the TUI.
+#
+# Herdr accepts global options before an optional command. A command such as
+# `herdr --machine host agent list` is not a TUI, even when the first argument
+# is an option. Consume the options and their values, then reject any remaining
+# positional token.
+_is_tui_command() {
+    set -f
+    set -- $1
+    set +f
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --session|--machine|--remote|--remote-keybindings)
+                if [ $# -lt 2 ]; then
+                    return 1
+                fi
+                shift 2
+                ;;
+            --session=*|--machine=*|--remote=*|--remote-keybindings=*)
+                shift
+                ;;
+            --handoff)
+                shift
+                ;;
+            --help|-h|--version|-V|--default-config|--skill)
+                return 1
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    done
+    return 0
+}
+
+self_test() {
+    failures=0
+
+    check() {
+        if [ "$2" -eq 0 ]; then
+            printf 'ok %s\n' "$1"
+        else
+            printf 'FAIL %s\n' "$1"
+            failures=$((failures + 1))
+        fi
+    }
+
+    classify_lines <<'EOF'
+client started normally
+EOF
+    check "benign log is unknown" "$([ "$STATE" = "unknown" ] && echo 0 || echo 1)"
+    check "benign log is not a restart" "$([ "$STATE" != "stuck" ] && [ "$STATE" != "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+handshake succeeded
+EOF
+    check "healthy log is ok" "$([ "$STATE" = "ok" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+did not acknowledge surface revocation
+EOF
+    check "revocation is stuck" "$([ "$STATE" = "stuck" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+connection was lost
+EOF
+    check "transport failure is fail" "$([ "$STATE" = "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+handshake succeeded
+connection was lost
+EOF
+    check "last failure wins" "$([ "$STATE" = "fail" ] && echo 0 || echo 1)"
+
+    classify_lines <<'EOF'
+connection was lost
+handshake succeeded
+EOF
+    check "recovery wins" "$([ "$STATE" = "ok" ] && echo 0 || echo 1)"
+
+    _is_tui_command ""
+    check "bare client matches" "$?"
+    _is_tui_command "--machine box"
+    check "client with a machine matches" "$?"
+    _is_tui_command "--machine=box --session main"
+    check "client with options matches" "$?"
+    _is_tui_command "status"
+    check "status command is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    _is_tui_command "machine status"
+    check "machine command is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    _is_tui_command "server"
+    check "server is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    _is_tui_command "remote-client-bridge"
+    check "bridge is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    _is_tui_command "--help"
+    check "help flag is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+    _is_tui_command "--machine"
+    check "option without a value is excluded" "$([ $? -ne 0 ] && echo 0 || echo 1)"
+
+    if [ "$failures" -ne 0 ]; then
+        printf 'self-test failed (%d)\n' "$failures"
+        return 1
+    fi
+    printf 'SELFTEST OK (watchdog state gate; TUI client match)\n'
+    return 0
+}
 
 if [ "$ACTION" = "help" ]; then
     cat <<'EOF'
@@ -113,6 +247,11 @@ Usage:
 Exit codes: 0 healthy, 2 cannot evaluate, 10 restarted, 11 dry run
 EOF
     exit "$EXIT_OK"
+fi
+
+if [ "$ACTION" = "selftest" ]; then
+    self_test
+    exit $?
 fi
 
 LOG_DIR="$HOME/Library/Logs/HerdrSetup"
@@ -160,29 +299,11 @@ if [ ! -f "$CLIENT_LOG" ]; then
     exit "$EXIT_CANNOT"
 fi
 
-state="unknown"
-last_line=""
-seen=0
+classify_lines < <(tail -n 120 "$CLIENT_LOG" 2>/dev/null)
+state="$STATE"
+last_line="$LAST_LINE"
 
-while IFS= read -r _l; do
-    seen=1
-    case "$_l" in
-        *"handshake succeeded"*)
-            state="ok"
-            last_line="$_l"
-            ;;
-        *"did not acknowledge surface revocation"*|*"endpoint health check timed out"*)
-            state="stuck"
-            last_line="$_l"
-            ;;
-        *"endpoint transport failed"*|*"connection was lost"*)
-            state="fail"
-            last_line="$_l"
-            ;;
-    esac
-done < <(tail -n 120 "$CLIENT_LOG" 2>/dev/null)
-
-if [ "$seen" -eq 0 ]; then
+if [ "$LINES_SEEN" -eq 0 ]; then
     log "client log is empty"
     exit "$EXIT_OK"
 fi
@@ -201,7 +322,8 @@ _age_min=$(( _age_sec / 60 ))
 
 log "state=$state logAge=${_age_min}min last=${last_line}"
 
-if [ "$state" = "ok" ]; then
+if [ "$state" = "ok" ] || [ "$state" = "unknown" ]; then
+    log "no failure state; waiting"
     exit "$EXIT_OK"
 fi
 
@@ -211,40 +333,6 @@ if [ "$_age_sec" -lt "$_stale_sec" ]; then
     exit "$EXIT_OK"
 fi
 
-# Return true only for arguments that launch the TUI.
-#
-# Herdr accepts global options before an optional command. A command such as
-# `herdr --machine host agent list` is not a TUI, even when the first argument
-# is an option. Consume the options and their values, then reject any remaining
-# positional token.
-_is_tui_command() {
-    set -f
-    set -- $1
-    set +f
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --session|--machine|--remote|--remote-keybindings)
-                if [ $# -lt 2 ]; then
-                    return 1
-                fi
-                shift 2
-                ;;
-            --session=*|--machine=*|--remote=*|--remote-keybindings=*)
-                shift
-                ;;
-            --handoff)
-                shift
-                ;;
-            --help|-h|--version|-V|--default-config|--skill)
-                return 1
-                ;;
-            *)
-                return 1
-                ;;
-        esac
-    done
-    return 0
-}
 
 # Find the TUI client only. The match is on the program name, not a substring
 # of the whole command line: `herdr-core connect`, an SSH control master, and a
@@ -269,6 +357,23 @@ for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
     PIDS="$PIDS $_pid"
 done
 PIDS="${PIDS# }"
+
+# The relaunch needs the client binary, whatever the selector finds.
+HERDR=""
+if command -v herdr >/dev/null 2>&1; then
+    HERDR="$(command -v herdr)"
+else
+    for _p in "$HOME/.local/bin/herdr" /opt/homebrew/bin/herdr /usr/local/bin/herdr; do
+        if [ -x "$_p" ]; then
+            HERDR="$_p"
+            break
+        fi
+    done
+fi
+if [ -z "$HERDR" ]; then
+    log "herdr not found"
+    exit "$EXIT_CANNOT"
+fi
 
 if [ -z "$PIDS" ]; then
     log "no local client process; nothing to restart"
@@ -295,22 +400,6 @@ for _pid in $PIDS; do
 done
 
 sleep 3
-
-HERDR=""
-if command -v herdr >/dev/null 2>&1; then
-    HERDR="$(command -v herdr)"
-else
-    for _p in "$HOME/.local/bin/herdr" /opt/homebrew/bin/herdr /usr/local/bin/herdr; do
-        if [ -x "$_p" ]; then
-            HERDR="$_p"
-            break
-        fi
-    done
-fi
-if [ -z "$HERDR" ]; then
-    log "herdr not found"
-    exit "$EXIT_CANNOT"
-fi
 
 # A TUI needs a console, and this watchdog runs from launchd with no terminal.
 # Terminal opens a window and runs the client; osascript must exist beforehand.
