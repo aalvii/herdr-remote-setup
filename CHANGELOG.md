@@ -27,6 +27,9 @@ Host-generated guest join codes and ACL automation.
 - `tools/mock-ts-api.py` and `tools/test-ts-api.sh`: offline tests for both host
   scripts against a mock API, including the ready, missing, unparsable, refused,
   and verify-only paths.
+- `docs/USAGE.md`: the complete operator guide. Requirements, one-time host
+  preparation, the API token, sharing, both client paths, checks, guest cleanup,
+  uninstall, and the failure table.
 
 ### Fixed
 

@@ -6,6 +6,9 @@ client to it in one step. Three layers: **network (Tailscale)**, **transport
 
 Version: see `VERSION`.
 
+Start with [`docs/USAGE.md`](docs/USAGE.md) for the complete operator
+instruction.
+
 ---
 
 ## 0. Simple setup: one PIN
@@ -466,6 +469,7 @@ bash app/herdr-setup.sh --self-test
 ## 9. More
 
 - `docs/SETUP-A-AND-B.md` — two-machine runbook for Host A and Machine B
+- `docs/USAGE.md` — complete operator guide: token, share, connect, cleanup
 - `docs/QUICKSTART.md` — one-page end-to-end flow
 - `docs/ACCESS-MODEL.md` — operator / client / herdr-host roles, tagging, ACL
 - `docs/acl-policy.hujson` — paste-ready tailnet policy
