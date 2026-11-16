@@ -19,7 +19,7 @@ jobs:
 
       - name: Python syntax
         run: |
-          python3 -m py_compile host/enroll.py host/pair.py tools/check-public.py
+          python3 -m py_compile host/enroll.py host/pair.py tools/check-public.py tools/mock-ts-api.py
 
       - name: Shell syntax
         run: |
@@ -40,8 +40,13 @@ jobs:
           bash host/setup.sh --version
           bash host/provision.sh --version
           bash host/pair.sh --help
+          bash host/ensure-acl.sh --self-test
+          bash host/guest-key.sh --self-test
           bash app/herdr-setup.sh --self-test
           bash client/setup-macos.sh --self-test
+
+      - name: Mock Tailscale API
+        run: bash tools/test-ts-api.sh
 
       - name: Desktop entries
         run: |
@@ -76,6 +81,12 @@ jobs:
       - name: Pair client self-test
         shell: powershell
         run: .\client\pair.ps1 -SelfTest
+
+      - name: Pair client join code self-test
+        shell: powershell
+        run: |
+          $code = 'tskey' + '-auth-' + 'example-not-a-key'
+          .\client\pair.ps1 -SelfTest -JoinCode $code
 
       - name: Simple app self-test
         shell: powershell

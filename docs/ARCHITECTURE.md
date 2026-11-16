@@ -91,6 +91,39 @@ host/pair.sh                       app Herdr-Setup.cmd
 - The traffic is plain HTTP inside the tailnet. WireGuard encrypts it. The PIN
   authorizes the key exchange.
 
+### Guest join code
+
+A guest without a Tailscale account needs one more step before the PIN.
+
+```
+Host A                                Machine B
+host/pair.sh                          app Herdr-Setup.cmd
+  ensure-acl.sh  GET/POST /acl          join code ->
+    adds the missing tag:client grant     tailscale up --authkey
+  guest-key.sh   POST /keys               joins as tag:client
+    prints one-time join code  ---->      POST key + PIN
+```
+
+- `host/ensure-acl.sh` reads the policy with `GET /api/v2/tailnet/-/acl`. It adds
+  only the missing entries, writes the full policy back with `POST /acl`, then
+  reads it again and checks the result. It backs up the original policy under
+  `/etc/herdr-setup` before any write, and it refuses to write when the policy is
+  unparsable or has an unexpected shape. `--no-acl-write` verifies only.
+- The policy may be HuJSON, with comments and trailing commas. The script parses
+  it, merges the missing entries, and posts strict JSON. A comment that is lost
+  in that conversion is recoverable from the backup.
+- `host/guest-key.sh` calls `POST /api/v2/tailnet/-/keys` with the guest
+  capability: `tag:client`, single use, not ephemeral, preauthorized, one hour.
+  The API key is read from the file inside the process; it never appears in a
+  command line or a log.
+- Both scripts need one Tailscale API token with auth-key creation and ACL
+  read/write, stored root-only. It is read by `sudo` and never printed.
+- The join code joins the network only. The PIN still authorizes the SSH key.
+  The host creates no key when the ACL is not ready, because a guest with no path
+  to the host would be stranded.
+- The join code is printed to the terminal only. It is not written to
+  `pair.log`, state files, or shell history.
+
 This removes the connection code and the Tailscale auth key from the normal
 flow. It still needs a Tailscale account on both machines. A UU-level experience
 without a Tailscale account would need a hosted rendezvous and relay service,

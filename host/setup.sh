@@ -185,7 +185,13 @@ if [ "$TS_UP" -eq 0 ]; then
   fi
 fi
 
-TS_IP="$("$TS_EXE" ip -4 2>/dev/null | head -1 || true)"
+# Tailscale 1.104 rejects the short -4 flag; try --4, then the bare list.
+TS_IP=""
+for attempt in --4 -4; do
+  TS_IP="$("$TS_EXE" ip "$attempt" 2>/dev/null | grep -E '^100\.' | head -1 || true)"
+  [ -n "$TS_IP" ] && break
+done
+[ -n "$TS_IP" ] || TS_IP="$("$TS_EXE" ip 2>/dev/null | grep -E '^100\.' | head -1 || true)"
 [ -n "$TS_IP" ] && ok "Tailscale IP: $TS_IP" || warn "No Tailscale IPv4 address"
 
 TS_DNS="$("$TS_EXE" status --json 2>/dev/null | tr ',' '\n' | sed -n 's/.*"DNSName": *"\([^"]*\)".*/\1/p' | head -1 || true)"

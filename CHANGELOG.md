@@ -1,5 +1,45 @@
 # Changelog
 
+## 4.0.2 - 2026-11-16
+
+Host-generated guest join codes and ACL automation.
+
+### Added
+
+- `host/guest-key.sh`: creates a one-time Tailscale auth key for a guest with
+  `POST /api/v2/tailnet/-/keys`. The key joins as `tag:client`, is single use,
+  is not ephemeral, is preauthorized, and expires after one hour. The script
+  reads the API token from `/etc/herdr-setup/tailscale-api.key`, prints only the
+  key, and never prints the token.
+- `host/ensure-acl.sh`: reads the tailnet policy, adds only the missing
+  `tagOwners.tag:client` entry and the `tag:client` to `tag:herdr-host` grant on
+  tcp:22 and tcp:8765, writes it back, and verifies the result. It backs up the
+  policy under `/etc/herdr-setup` before a write, refuses an unparsable or
+  unexpected policy, and supports `--no-acl-write` for a check-only run.
+- `host/pair.sh` now checks the policy and prints a `Guest join code` when a
+  token is stored. A missing or rejected token falls back to PIN-only with a
+  warning. New flags: `--no-join-code`, `--no-acl-write`.
+- `client/pair.ps1 -JoinCode` joins the host's tailnet with the code before the
+  PIN step, and redacts key-shaped strings from its log. It refuses a code with
+  the wrong prefix and reports when the machine is already on a tailnet.
+- `app/herdr-connect.ps1` has an optional **Join code** field above the PIN and
+  shows a warning when it is filled.
+- `tools/mock-ts-api.py` and `tools/test-ts-api.sh`: offline tests for both host
+  scripts against a mock API, including the ready, missing, unparsable, refused,
+  and verify-only paths.
+
+### Fixed
+
+- Tailscale 1.104 rejects `tailscale ip -4`. `host/pair.sh` and `host/setup.sh`
+  now try `--4`, then the bare `ip` list filtered to `100.`, then `-4`.
+
+### Changed
+
+- `docs/acl-policy.hujson` names tcp:8765 in the tagged-client grant, so a guest
+  can reach the pairing service as well as SSH.
+- README, QUICKSTART, SETUP-A-AND-B, ARCHITECTURE, TROUBLESHOOTING, and
+  SECURITY describe the join code, the ACL automation, and the API token.
+
 ## 4.0.1 - 2026-11-16
 
 Fix the host desktop entries.

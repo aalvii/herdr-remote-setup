@@ -62,6 +62,27 @@ successful connection. Ctrl+C stops sharing.
 The host flow checks or starts sshd and herdr, then starts the pairing service
 on the Tailscale address. It does not enable Tailscale SSH.
 
+### Guest without a Tailscale account
+
+When the host has a Tailscale API token at
+`/etc/herdr-setup/tailscale-api.key`, the window also prints a one-time guest
+join code:
+
+```
+Guest join code: <one-time key>
+  PIN      : 123456
+```
+
+The code expires after one hour and works once. The guest pastes it into the
+Connect panel before the PIN. The host checks the tailnet policy first and adds
+the `tag:client` grant only when it is missing; it keeps a backup under
+`/etc/herdr-setup`. The guest joins the owner's tailnet as a tagged device, so it
+can see the peer list, while the ACL blocks every destination except the herdr
+host.
+
+Use `bash host/pair.sh --no-acl-write` to check the policy without writing it,
+and `bash host/pair.sh --no-join-code` to stay PIN-only.
+
 If it exits with `SSH server is not running`, start sshd. On macOS, enable
 System Settings > General > Sharing > Remote Login.
 
@@ -79,6 +100,11 @@ System Settings > General > Sharing > Remote Login.
 The app signs in to Tailscale if needed, installs herdr if missing, sends the
 public key and PIN, tests SSH, adds the machine to herdr, and installs the
 watchdog. No command line is needed.
+
+When the host prints a guest join code, paste it into the **Join code** field.
+The app then joins the host's tailnet as a tagged guest device before the PIN
+step, and it warns you that it does. Leave the field empty to sign in to
+Tailscale yourself, as in 4.0.0.
 
 If the list is empty, click **Refresh**. Both machines must be online in the same
 tailnet, and the host sharing window must still be open.

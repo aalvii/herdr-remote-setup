@@ -12,6 +12,7 @@
 param(
     [string]$HostName,
     [string]$Pin,
+    [string]$JoinCode,
     [int]$Port = 8765,
     [switch]$SelfTest,
     [switch]$NoGui,
@@ -28,6 +29,10 @@ if (Test-Path -LiteralPath $VersionFile) {
     $Version = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
 }
 
+# The guest join code prefix. Built from parts so the self-test's secret scan
+# stays meaningful for real keys.
+$JoinPrefix = 'tskey' + '-auth-'
+
 function Invoke-SelfTest {
     $problems = New-Object System.Collections.Generic.List[string]
     if (-not (Test-Path -LiteralPath $VersionFile)) { $problems.Add('VERSION file missing') }
@@ -37,6 +42,7 @@ function Invoke-SelfTest {
         }
     }
     if ($Pin -and $Pin -notmatch '^[0-9]{6}$') { $problems.Add('PIN must be 6 digits') }
+    if ($JoinCode -and -not $JoinCode.StartsWith($JoinPrefix)) { $problems.Add('join code has the wrong prefix') }
     $secretPrefix = 'tskey' + '-'
     foreach ($file in (Get-ChildItem -LiteralPath $ScriptRoot -File | Where-Object { $_.Extension -in @('.ps1', '.sh') })) {
         try {
@@ -229,48 +235,71 @@ $hostBox.Location = New-Object System.Drawing.Point(474, 58)
 $hostBox.Size = New-Object System.Drawing.Size(250, 24)
 $panel.Controls.Add($hostBox)
 
+$joinLabel = New-Object System.Windows.Forms.Label
+$joinLabel.Location = New-Object System.Drawing.Point(4, 96)
+$joinLabel.Size = New-Object System.Drawing.Size(460, 20)
+$joinLabel.Text = 'Join code (optional, from the host)'
+$panel.Controls.Add($joinLabel)
+
+$joinBox = New-Object System.Windows.Forms.TextBox
+$joinBox.Location = New-Object System.Drawing.Point(4, 118)
+$joinBox.Size = New-Object System.Drawing.Size(460, 24)
+$panel.Controls.Add($joinBox)
+
+$joinWarn = New-Object System.Windows.Forms.Label
+$joinWarn.Location = New-Object System.Drawing.Point(474, 118)
+$joinWarn.Size = New-Object System.Drawing.Size(250, 40)
+$joinWarn.Text = "This joins the host's tailnet as a tagged guest device."
+$joinWarn.ForeColor = [System.Drawing.Color]::DarkOrange
+$joinWarn.Visible = $false
+$panel.Controls.Add($joinWarn)
+
+$joinBox.Add_TextChanged({
+    $joinWarn.Visible = ($joinBox.Text.Trim().Length -gt 0)
+})
+
 $pinLabel = New-Object System.Windows.Forms.Label
-$pinLabel.Location = New-Object System.Drawing.Point(4, 154)
+$pinLabel.Location = New-Object System.Drawing.Point(4, 168)
 $pinLabel.Size = New-Object System.Drawing.Size(200, 20)
 $pinLabel.Text = 'PIN from the other computer'
 $panel.Controls.Add($pinLabel)
 
 $pinBox = New-Object System.Windows.Forms.TextBox
-$pinBox.Location = New-Object System.Drawing.Point(4, 176)
+$pinBox.Location = New-Object System.Drawing.Point(4, 190)
 $pinBox.Size = New-Object System.Drawing.Size(140, 24)
 $pinBox.MaxLength = 6
 $pinBox.PasswordChar = '*'
 $panel.Controls.Add($pinBox)
 
 $watchdogBox = New-Object System.Windows.Forms.CheckBox
-$watchdogBox.Location = New-Object System.Drawing.Point(160, 176)
+$watchdogBox.Location = New-Object System.Drawing.Point(160, 190)
 $watchdogBox.Size = New-Object System.Drawing.Size(300, 24)
 $watchdogBox.Text = 'Install the connection watchdog'
 $watchdogBox.Checked = $true
 $panel.Controls.Add($watchdogBox)
 
 $connectBtn = New-Object System.Windows.Forms.Button
-$connectBtn.Location = New-Object System.Drawing.Point(474, 170)
+$connectBtn.Location = New-Object System.Drawing.Point(474, 184)
 $connectBtn.Size = New-Object System.Drawing.Size(130, 34)
 $connectBtn.Text = 'Connect'
 $panel.Controls.Add($connectBtn)
 
 $openBtn = New-Object System.Windows.Forms.Button
-$openBtn.Location = New-Object System.Drawing.Point(614, 170)
+$openBtn.Location = New-Object System.Drawing.Point(614, 184)
 $openBtn.Size = New-Object System.Drawing.Size(110, 34)
 $openBtn.Text = 'Open herdr'
 $openBtn.Enabled = $false
 $panel.Controls.Add($openBtn)
 
 $outLabel = New-Object System.Windows.Forms.Label
-$outLabel.Location = New-Object System.Drawing.Point(4, 214)
+$outLabel.Location = New-Object System.Drawing.Point(4, 226)
 $outLabel.Size = New-Object System.Drawing.Size(200, 20)
 $outLabel.Text = 'Output'
 $panel.Controls.Add($outLabel)
 
 $outputBox = New-Object System.Windows.Forms.RichTextBox
-$outputBox.Location = New-Object System.Drawing.Point(4, 236)
-$outputBox.Size = New-Object System.Drawing.Size(720, 198)
+$outputBox.Location = New-Object System.Drawing.Point(4, 248)
+$outputBox.Size = New-Object System.Drawing.Size(720, 186)
 $outputBox.ReadOnly = $true
 $outputBox.BackColor = [System.Drawing.Color]::White
 $outputBox.Font = New-Object System.Drawing.Font('Consolas', 9)
@@ -354,6 +383,7 @@ function Set-Busy {
     $refreshBtn.Enabled = -not $Busy
     $hostList.Enabled = -not $Busy
     $hostBox.Enabled = -not $Busy
+    $joinBox.Enabled = -not $Busy
     $pinBox.Enabled = -not $Busy
     $watchdogBox.Enabled = -not $Busy
 }
@@ -361,8 +391,13 @@ function Set-Busy {
 $connectBtn.Add_Click({
     $hostValue = $hostBox.Text.Trim()
     $pinValue = $pinBox.Text.Trim()
+    $joinValue = $joinBox.Text.Trim()
     if (-not $hostValue) {
         [void][System.Windows.Forms.MessageBox]::Show('Choose a computer or type its host name or IP.', 'Herdr Connect', 'OK', 'Warning')
+        return
+    }
+    if ($joinValue -and -not $joinValue.StartsWith($JoinPrefix)) {
+        [void][System.Windows.Forms.MessageBox]::Show('The join code is not valid. Copy the whole code from the host window, or leave the field empty to sign in to Tailscale yourself.', 'Herdr Connect', 'OK', 'Warning')
         return
     }
     if ($pinValue -notmatch '^[0-9]{6}$') {
@@ -373,6 +408,7 @@ $connectBtn.Add_Click({
     $pair = Join-Path $ScriptRoot '..\client\pair.ps1'
     $pair = (Resolve-Path $pair).Path
     $argLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $pair + '" -HostName "' + $hostValue + '" -Pin "' + $pinValue + '" -Port ' + $Port + ' -Json'
+    if ($joinValue) { $argLine += ' -JoinCode "' + $joinValue + '"' }
     if (-not $watchdogBox.Checked) { $argLine += ' -NoWatchdog' }
 
     Set-Busy -Busy $true

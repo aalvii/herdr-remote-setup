@@ -55,6 +55,43 @@ ls -ld ~ ~/.ssh ~/.ssh/authorized_keys
 `~/.ssh` must be 700, `authorized_keys` 600, and `$HOME` must not be group or
 other writable. On macOS run `chmod go-w ~`.
 
+### The host prints no guest join code
+
+A missing token never stops sharing; the host falls back to PIN-only. Check the
+reason in the host window:
+
+| Message | Cause | Fix |
+|---|---|---|
+| `No Tailscale API token` | no token file | store one at `/etc/herdr-setup/tailscale-api.key`, mode 600 |
+| `the API token cannot read the policy` | wrong scope or revoked token | create a token with ACL read and write |
+| `The tailnet ACL is not ready` | missing entries and no write | fix the policy, or run `sudo bash host/ensure-acl.sh` without `--no-acl-write` |
+| `This host is not tagged tag:herdr-host` | the host has no tag | `sudo tailscale up --advertise-tags=tag:herdr-host` |
+
+Run the check alone with `sudo bash host/ensure-acl.sh --no-acl-write`. Exit 0
+means the policy is ready. Exit 3 means it is not, and the script prints the
+JSON snippet to add.
+
+### The ACL was not changed
+
+`host/ensure-acl.sh` writes nothing when the policy cannot be parsed, when its
+shape is unexpected, when the token is refused, or when `--no-acl-write` was
+passed. Every write leaves a backup:
+
+```bash
+ls -l /etc/herdr-setup/acl-backup-*.hujson
+```
+
+Restore one by pasting its contents into the tailnet policy editor. Comments in
+the original HuJSON may be dropped when the script writes JSON; the backup keeps
+them.
+
+### The join code is rejected
+
+The code is single use and expires after one hour. Restart `host/pair.sh` on the
+host for a new one. If Tailscale reports that the machine is already logged in,
+the client is on another tailnet: log out on that machine first, and only with
+the user's agreement.
+
 ### Port 8765 is busy
 
 Another service owns the port. Stop it, or start the host on another port:

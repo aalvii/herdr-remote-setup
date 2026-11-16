@@ -7,7 +7,12 @@
 # Usage:
 #   ./pair.sh
 #   ./pair.sh --ttl 900
+#   ./pair.sh --no-join-code               # PIN only, no tailnet join code
+#   ./pair.sh --no-acl-write               # check the ACL, never write it
 #   ./pair.sh --pin 123456 --once          # tests
+#
+# When /etc/herdr-setup/tailscale-api.key exists, the share flow also ensures
+# the tailnet policy allows tag:client and prints a one-time guest join code.
 #
 # Exit codes: 0 ok, 2 prerequisite, 3 network, 4 transport, 5 herdr.
 
@@ -18,6 +23,8 @@ VERSION="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null || echo "0.0.0")"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-setup"
 PORT="${HERDR_PAIR_PORT:-8765}"
 BIND=""
+NO_JOIN_CODE=0
+NO_ACL_WRITE=0
 PAIR_ARGS=()
 
 while [ $# -gt 0 ]; do
@@ -26,7 +33,9 @@ while [ $# -gt 0 ]; do
     --port=*) PORT="${1#--port=}"; shift ;;
     --bind) BIND="${2:-}"; shift 2 ;;
     --bind=*) BIND="${1#--bind=}"; shift ;;
-    --help|-h) sed -n '2,12p' "$0"; exit 0 ;;
+    --no-join-code) NO_JOIN_CODE=1; shift ;;
+    --no-acl-write) NO_ACL_WRITE=1; shift ;;
+    --help|-h) sed -n '/^# Simple host share/,/^# Exit codes/p' "$0"; exit 0 ;;
     *) PAIR_ARGS+=("$1"); shift ;;
   esac
 done
@@ -50,7 +59,20 @@ TS="$(command -v tailscale 2>/dev/null || true)"
 [ -n "$TS" ] || die 3 "Tailscale not found. Install it and join the tailnet first."
 
 "$TS" status >/dev/null 2>&1 || die 3 "Tailscale is not connected. Run 'sudo tailscale up' first."
-TS_IP="$("$TS" ip -4 2>/dev/null | head -1)"
+
+# Tailscale changed the short flag in 1.104: --4 works, -4 is rejected.
+ts_ipv4() {
+  local ip=""
+  ip="$("$1" ip --4 2>/dev/null | grep -E '^100\.' | head -1)"
+  [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  ip="$("$1" ip 2>/dev/null | grep -E '^100\.' | head -1)"
+  [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  ip="$("$1" ip -4 2>/dev/null | grep -E '^100\.' | head -1)"
+  [ -n "$ip" ] && { printf '%s\n' "$ip"; return 0; }
+  return 1
+}
+
+TS_IP="$(ts_ipv4 "$TS")"
 [ -n "$TS_IP" ] || die 3 "No Tailscale IPv4 address. Run 'tailscale up' first."
 [ -n "$BIND" ] || BIND="$TS_IP"
 
@@ -115,6 +137,46 @@ touch "$HOME/.ssh/authorized_keys" 2>/dev/null || true
 chmod 600 "$HOME/.ssh/authorized_keys" 2>/dev/null || true
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# ---------- guest join code ----------
+# A missing or rejected API token must never stop the PIN flow.
+run_root() {
+  if sudo -n true 2>/dev/null; then sudo -n "$@"; else sudo "$@"; fi
+}
+
+JOIN_CODE=""
+JOIN_STATE="off"
+if [ "$NO_JOIN_CODE" -eq 1 ]; then
+  JOIN_STATE="off"
+elif ! "$TS" status --json 2>/dev/null | grep -q 'tag:herdr-host'; then
+  echo "! This host is not tagged tag:herdr-host."
+  echo "  Apply it with: sudo tailscale up --advertise-tags=tag:herdr-host"
+  JOIN_STATE="untagged"
+else
+  ENSURE_ARGS=()
+  [ "$NO_ACL_WRITE" -eq 1 ] && ENSURE_ARGS+=(--no-acl-write)
+  run_root bash "$SCRIPT_DIR/ensure-acl.sh" ${ENSURE_ARGS[@]+"${ENSURE_ARGS[@]}"}
+  ACL_RC=$?
+  if [ "$ACL_RC" -eq 2 ]; then
+    echo "! No Tailscale API token. PIN-only; the guest must already be on the tailnet."
+    JOIN_STATE="no-token"
+  elif [ "$ACL_RC" -ne 0 ]; then
+    echo "! The tailnet ACL is not ready. PIN-only for now."
+    JOIN_STATE="acl"
+  else
+    JOIN_CODE="$(run_root bash "$SCRIPT_DIR/guest-key.sh" 2>"$STATE_DIR/guest-key.err")"
+    JOIN_CODE="$(printf '%s' "$JOIN_CODE" | tr -d '[:space:]')"
+    case "$JOIN_CODE" in
+      tskey-auth-*) JOIN_STATE="ready" ;;
+      *)
+        JOIN_CODE=""
+        JOIN_STATE="key"
+        echo "! Could not create a guest join code. PIN-only for now."
+        sed -n '1,3p' "$STATE_DIR/guest-key.err" 2>/dev/null
+        ;;
+    esac
+  fi
+fi
+
 echo ""
 echo "Herdr Share v$VERSION"
 echo "  Computer : $(hostname 2>/dev/null || echo unknown)"
@@ -122,6 +184,11 @@ echo "  User     : $(whoami 2>/dev/null || echo user)"
 echo "  Address  : $BIND:$PORT"
 echo "  herdr    : $("$HERDR" --version 2>/dev/null | head -1)"
 echo ""
+
+if [ -n "$JOIN_CODE" ]; then
+  echo "Guest join code: $JOIN_CODE"
+  echo ""
+fi
 
 exec python3 "$SCRIPT_DIR/pair.py" \
   --bind "$BIND" \

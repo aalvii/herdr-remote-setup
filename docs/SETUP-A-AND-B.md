@@ -62,10 +62,13 @@ The host flow:
 1. Checks Tailscale and prints an error if it is not connected.
 2. Checks or starts sshd.
 3. Installs herdr if missing and starts the herdr server detached.
-4. Starts the pairing service on the Tailscale address at port 8765.
-5. Prints the PIN.
+4. When an API token is stored, checks or adds the `tag:client` policy entries
+   and creates a one-time guest join code.
+5. Starts the pairing service on the Tailscale address at port 8765.
+6. Prints the join code, when there is one, and the PIN.
 
-It never enables Tailscale SSH.
+It never enables Tailscale SSH. A missing or rejected API token does not stop
+the PIN flow: the host prints a warning and continues PIN-only.
 
 ### macOS host
 

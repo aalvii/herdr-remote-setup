@@ -1,12 +1,13 @@
 # Herdr Connect - Windows client for the PIN pairing flow.
 # Version: see ..\VERSION
 #
-# No connection code and no Tailscale auth key. The host shows a 6-digit PIN.
-# This script finds the host on the tailnet, sends its SSH public key and the
-# PIN to the host pairing service, then registers the machine in herdr.
+# No connection code. The host shows a 6-digit PIN. The host can also print a
+# one-time guest join code (tskey-auth-...), which joins this machine to the
+# host's tailnet as a tagged guest device before the PIN pairing.
 #
 # Usage:
 #   pair.ps1 -HostName 100.x.y.z -Pin 123456
+#   pair.ps1 -HostName 100.x.y.z -Pin 123456 -JoinCode tskey-auth-...
 #   pair.ps1 -HostName host -Pin 123456 -Json
 #   pair.ps1 -SelfTest
 #
@@ -16,6 +17,7 @@
 param(
     [string]$HostName,
     [string]$Pin,
+    [string]$JoinCode,
     [int]$Port = 8765,
     [switch]$Json,
     [switch]$NoWatchdog,
@@ -42,8 +44,12 @@ if (-not $LogDir) { $LogDir = Join-Path $env:LOCALAPPDATA "HerdrSetup\logs" }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir ("pair-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 
+function Mask-Secret { param([string]$Text)
+    if (-not $Text) { return $Text }
+    return [regex]::Replace($Text, 'tskey-[A-Za-z0-9_-]+', 'tskey-***') }
+
 function Log { param([string]$Message, [string]$Level="INFO")
-    $line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"), $Level, $Message
+    $line = "{0} [{1}] {2}" -f (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ"), $Level, (Mask-Secret $Message)
     try { Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8 } catch { } }
 function Say  { param($m) if (-not $Json) { Write-Host $m }; Log $m }
 function Step { param($m) if (-not $Json) { Write-Host ">> $m" -ForegroundColor Blue }; Log "STEP $m" }
@@ -65,7 +71,7 @@ function Get-TailscaleExe {
 }
 
 function Connect-Tailscale {
-    param([string]$Target)
+    param([string]$Target, [string]$JoinCode)
     $tsExe = Get-TailscaleExe
     if (-not $tsExe) {
         Warn "Tailscale not installed"
@@ -99,12 +105,28 @@ function Connect-Tailscale {
     $st = (& $tsExe status 2>&1 | Out-String)
     if ($st -match [regex]::Escape($Target)) { $visible = $true }
 
+    if ($JoinCode) {
+        Step "Joining the host's tailnet with the guest join code"
+        Say "This joins the host's Tailscale tailnet as a tagged guest device."
+        $up = (& $tsExe up "--authkey=$JoinCode" --accept-routes=false 2>&1 | Out-String)
+        if ($up.Trim()) { Log $up.Trim() }
+        if ($LASTEXITCODE -ne 0) {
+            if ($up -match 'already|logged|tailnet') {
+                Fail $EXIT_NET "This machine is already on a tailnet. Log out first if you agree to join the host's tailnet."
+            }
+            Fail $EXIT_NET "The host rejected the join code. It may be used or expired. Ask the host for a new one."
+        }
+        $visible = $false
+    }
+
     if (-not $visible) {
-        Step "Signing in to Tailscale"
-        Say "A browser window opens. Sign in with the same account as the host."
-        try {
-            & $tsExe up --accept-routes=false 2>&1 | Out-String | ForEach-Object { Log $_ }
-        } catch { Warn "tailscale up: $($_.Exception.Message)" }
+        if (-not $JoinCode) {
+            Step "Signing in to Tailscale"
+            Say "A browser window opens. Sign in with the same account as the host."
+            try {
+                & $tsExe up --accept-routes=false 2>&1 | Out-String | ForEach-Object { Log $_ }
+            } catch { Warn "tailscale up: $($_.Exception.Message)" }
+        }
         Step "Waiting for the host"
         $deadline = (Get-Date).AddSeconds(180)
         while ((Get-Date) -lt $deadline) {
@@ -205,9 +227,10 @@ if ($SelfTest) {
     if (-not (Test-Path (Join-Path $PackageRoot "VERSION"))) { $problems += "VERSION file missing" }
     if (-not (Test-Path (Join-Path $ScriptRoot "install-watchdog.ps1"))) { $problems += "install-watchdog.ps1 missing" }
     if ($Pin -and $Pin -notmatch '^[0-9]{6}$') { $problems += "PIN must be 6 digits" }
+    if ($JoinCode -and $JoinCode -notmatch '^tskey-auth-') { $problems += "join code must start with tskey-auth-" }
     $ts = Get-TailscaleExe
     if ($problems.Count -eq 0) {
-        Write-Output ("SELFTEST OK (v{0}; pair protocol 1; tailscale={1})" -f $Version, $(if ($ts) { "found" } else { "not installed" }))
+        Write-Output ("SELFTEST OK (v{0}; pair protocol 1; join codes; tailscale={1})" -f $Version, $(if ($ts) { "found" } else { "not installed" }))
         exit 0
     }
     $problems | ForEach-Object { Write-Output "SELFTEST FAIL: $_" }
@@ -217,12 +240,13 @@ if ($SelfTest) {
 if (-not $HostName) { Fail $EXIT_PREREQ "Missing -HostName" }
 if (-not $Pin) { Fail $EXIT_PREREQ "Missing -Pin" }
 if ($Pin -notmatch '^[0-9]{6}$') { Fail $EXIT_PREREQ "PIN must be 6 digits" }
+if ($JoinCode -and $JoinCode -notmatch '^tskey-auth-') { Fail $EXIT_PREREQ "The join code must start with tskey-auth-" }
 if ($env:OS -ne "Windows_NT") { Fail $EXIT_PREREQ "This script targets Windows." }
 
 Step "Herdr Connect v$Version"
 Log "log file: $LogFile"
 
-$tsExe = Connect-Tailscale -Target $HostName
+$tsExe = Connect-Tailscale -Target $HostName -JoinCode $JoinCode
 $ip = $HostName
 $peer = Resolve-Peer -Target $HostName -TsExe $tsExe
 if ($peer) {

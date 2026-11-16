@@ -58,7 +58,12 @@
   //      [
   //        { "src": ["tag:operator"], "dst": ["*"], "ip": ["*"] },
   //        { "src": ["tag:client"], "dst": ["tag:herdr-host"],
-  //          "ip": ["tcp:22"] }
+  //          "ip": ["tcp:22", "tcp:8765"] }
+  //
+  //    tcp:22 is the OpenSSH key path herdr uses. tcp:8765 is the pairing
+  //    service that carries the PIN and the SSH key. A guest that joins with
+  //    a host-generated join code needs both. host/ensure-acl.sh adds this
+  //    grant, and the tagOwners entry above, when they are missing.
   //      ]
   //
   // 3) Keep clients out of every other destination. A client with no

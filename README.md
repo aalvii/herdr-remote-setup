@@ -10,25 +10,54 @@ Version: see `VERSION`.
 
 ## 0. Simple setup: one PIN
 
-The primary path needs no connection code, no Tailscale auth key, and no IP
-address.
+The primary path needs no connection code and no IP address.
 
 1. **Host, Linux or macOS.** Start sharing:
    - double-click `host/Herdr-Provision.desktop` or
      `host/Herdr-Provision.command`; or
    - run `host/pair.sh`.
-   The host prints a computer name and a 6-digit PIN.
+   The host prints a computer name, a 6-digit PIN, and, when an API token is
+   stored, a one-time **guest join code**.
 2. **Client, Windows.** Double-click `app\Herdr-Setup.cmd`.
-   Click **Connect to a computer**. Pick the computer. Enter the PIN. Click
-   **Connect**. Then click **Open herdr**.
+   Click **Connect to a computer**. Pick the computer. Paste the join code if
+   the host printed one. Enter the PIN. Click **Connect**. Then click
+   **Open herdr**.
 3. Done. The machine is added to herdr and the watchdog is installed.
 
-No `tskey-...` value. No base64 code. No IP address. No command line.
+No base64 code. No IP address. No command line.
+
+### 0.1 The guest join code
+
+A guest without a Tailscale account can join the owner's tailnet as a tagged
+`tag:client` device. One admin action is still needed, once:
+
+1. Create a Tailscale API token with auth-key creation and ACL read/write, and
+   store it root-only on the host:
+   ```bash
+   sudo mkdir -p /etc/herdr-setup
+   sudo sh -c 'printf "%s\n" "<your-api-token>" > /etc/herdr-setup/tailscale-api.key'
+   sudo chmod 600 /etc/herdr-setup/tailscale-api.key
+   ```
+2. Each guest run then needs no admin console. `host/pair.sh` checks the policy
+   with `host/ensure-acl.sh`, creates a one-time key with `host/guest-key.sh`,
+   and prints `Guest join code: <one-time key>`.
+3. The guest pastes that code into the Connect panel. The client joins the
+   tailnet with it, then pairs the SSH key with the PIN.
+
+The host never writes the policy when the required entries already exist. It
+adds only missing entries, keeps a backup under `/etc/herdr-setup`, and prints
+the JSON snippet when it cannot write. Without the token the flow is PIN-only,
+as in 4.0.0.
+
+Use `host/pair.sh --no-join-code` for PIN-only sharing, and
+`host/pair.sh --no-acl-write` to check the policy without changing it.
 
 | Action | Linux | macOS | Windows |
 |--------|:---:|:---:|:---:|
 | Share this computer | yes | yes | not shipped |
+| Share with a guest join code | yes | yes | not shipped |
 | Connect with a PIN | not shipped | Advanced flow in 4.0.0 | yes |
+| Connect with a join code and PIN | not shipped | no | yes |
 | Advanced connection code | yes | yes | yes |
 
 The host pairing service listens on the Tailscale address only. The PIN is six
