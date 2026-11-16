@@ -2,8 +2,8 @@
 """Regression tests for the macOS watchdog client selector.
 
 The watchdog runs on macOS only, so these cases skip on other platforms. The
-process table and osascript are replaced by fakes on PATH, so no real process is
-signalled and no Terminal window opens.
+process table and osascript are fakes, and every PID names a test-owned helper.
+No unrelated process is signalled and no Terminal window opens.
 
 Contracts pinned here:
   - only the herdr client TUI is selected; herdr-core, an SSH control master, a
@@ -110,6 +110,10 @@ class Sandbox(object):
         self.procs = os.path.join(self.tmp, "procs.txt")
         self.osascript = os.path.join(self.tmp, "osascript.txt")
         self.log = os.path.join(self.tmp, "client.log")
+        self.watchdog_log = os.path.join(
+            self.home, "Library", "Logs", "HerdrSetup", "watchdog.log")
+        self.helpers = {}
+        self.pid_map = {}
         self.write_tool("pgrep", FAKE_PGREP)
         self.write_tool("ps", FAKE_PS)
         self.write_tool("osascript", FAKE_OSASCRIPT)
@@ -133,9 +137,35 @@ class Sandbox(object):
         os.chmod(path, 0o755)
 
     def write_procs(self, procs):
+        self.stop_helpers()
+        self.pid_map = {}
         with open(self.procs, "w", encoding="utf-8") as handle:
-            for pid, comm, cmd in procs:
-                handle.write("%s\t%s\t%s\n" % (pid, comm, cmd))
+            for logical, comm, cmd in procs:
+                helper = subprocess.Popen(
+                    [sys.executable, "-c", "import time; time.sleep(300)"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.helpers[logical] = helper
+                self.pid_map[logical] = str(helper.pid)
+                handle.write("%s\t%s\t%s\n" % (helper.pid, comm, cmd))
+
+    def stop_helpers(self):
+        for helper in self.helpers.values():
+            if helper.poll() is None:
+                helper.terminate()
+        for helper in self.helpers.values():
+            try:
+                helper.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                helper.kill()
+                helper.wait(timeout=2)
+        self.helpers = {}
+
+    def real_pid(self, logical):
+        return self.pid_map[logical]
+
+    def process_alive(self, logical):
+        helper = self.helpers.get(logical)
+        return helper is not None and helper.poll() is None
 
     @property
     def machines_path(self):
@@ -159,8 +189,7 @@ class Sandbox(object):
 
     def run(self, args=(), machine=None, use_machines=None, herdr_dir=None,
             procs=None, last_machine=None):
-        if procs is not None:
-            self.write_procs(procs)
+        self.write_procs(procs if procs is not None else PROCS)
         env = {
             "HOME": self.home,
             "PATH": ((herdr_dir + ":") if herdr_dir else "") + self.bin
@@ -176,6 +205,8 @@ class Sandbox(object):
             os.unlink(self.machines_path)
         if os.path.exists(self.last_machine_path):
             os.unlink(self.last_machine_path)
+        if os.path.exists(self.watchdog_log):
+            os.unlink(self.watchdog_log)
         if use_machines is not None:
             self.machines_file(use_machines)
         if last_machine is not None:
@@ -186,15 +217,14 @@ class Sandbox(object):
         if os.path.exists(self.osascript):
             with open(self.osascript, "r", encoding="utf-8") as handle:
                 recorded = handle.read().replace('\\"', '"')
-        watchdog_log = os.path.join(self.home, "Library", "Logs",
-                                    "HerdrSetup", "watchdog.log")
         logged = ""
-        if os.path.exists(watchdog_log):
-            with open(watchdog_log, "r", encoding="utf-8") as handle:
+        if os.path.exists(self.watchdog_log):
+            with open(self.watchdog_log, "r", encoding="utf-8") as handle:
                 logged = handle.read()
         return proc.returncode, proc.stdout + proc.stderr, recorded, logged
 
     def close(self):
+        self.stop_helpers()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 
@@ -212,11 +242,43 @@ def main():
         dry = [line for line in logged.splitlines() if "DRY RUN" in line]
         check("select: dry run reports the restart", rc == 11, (rc, out))
         check("select: only the client TUI is selected",
-              len(dry) == 1 and "would stop 100 " in dry[0], dry)
+              len(dry) == 1
+              and "would stop %s " % box.real_pid("100") in dry[0], dry)
         check("select: the dry run signals nothing", recorded == "", recorded)
+
+        cli_procs = [("110", "/usr/local/bin/herdr",
+                      "/usr/local/bin/herdr --machine pi agent list")]
+        rc, out, recorded, logged = box.run(["--dry-run"], procs=cli_procs)
+        check("select: --machine before a CLI subcommand is not the TUI",
+              rc == 0 and "would stop" not in logged, (rc, logged))
+
+        cli_procs = [("111", "/usr/local/bin/herdr",
+                      "/usr/local/bin/herdr --machine=pi agent list")]
+        rc, out, recorded, logged = box.run(["--dry-run"], procs=cli_procs)
+        check("select: an equals-form option before a CLI subcommand is not the TUI",
+              rc == 0 and "would stop" not in logged, (rc, logged))
+
+        tui_procs = [("112", "/usr/local/bin/herdr",
+                      "/usr/local/bin/herdr --machine remote-client-bridge")]
+        rc, out, recorded, logged = box.run(["--dry-run"], procs=tui_procs)
+        check("select: a TUI label is not a bridge command",
+              rc == 11
+              and "would stop %s " % box.real_pid("112") in logged,
+              (rc, logged))
+
+        tui_procs = [("113", "/usr/local/bin/herdr",
+                      "/usr/local/bin/herdr --session work --machine pi")]
+        rc, out, recorded, logged = box.run(["--dry-run"], procs=tui_procs)
+        check("select: TUI options do not hide the client",
+              rc == 11
+              and "would stop %s " % box.real_pid("113") in logged,
+              (rc, logged))
 
         rc, out, recorded, logged = box.run(["--machine", "pi-host"])
         check("relaunch: the watchdog restarts the client", rc == 10, (rc, out))
+        check("relaunch: the watchdog signals only selected PIDs",
+              not box.process_alive("100") and box.process_alive("101"),
+              (box.process_alive("100"), box.process_alive("101")))
         check("relaunch: --machine is passed to the client",
               "--machine 'pi-host'" in recorded, recorded)
 

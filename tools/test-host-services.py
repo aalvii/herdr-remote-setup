@@ -261,6 +261,18 @@ def test_pair_restricted_existing():
           lines == [existing], lines)
 
 
+def test_pair_comment_is_not_a_key():
+    requested = make_key("r")
+    existing = make_key("x") + " comment " + requested
+    with PairCase(keys=[existing]) as case:
+        status, body = case.post(PIN, requested)
+        lines = case.key_lines()
+    check("pair: a key in a comment is not already present",
+          status == 200 and body.get("alreadyPresent") is False, (status, body))
+    check("pair: a key in a comment does not block an append",
+          len(lines) == 2 and lines[1] == requested, lines)
+
+
 def test_pair_parallel_rate_limit():
     with PairCase() as case:
         barrier = threading.Barrier(20)
@@ -529,6 +541,7 @@ def main():
     test_pair_non_ascii_pin()
     test_pair_exact_blob()
     test_pair_restricted_existing()
+    test_pair_comment_is_not_a_key()
     test_pair_parallel_rate_limit()
     test_pair_parallel_success()
     test_surrogate_secrets()

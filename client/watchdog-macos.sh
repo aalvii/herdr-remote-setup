@@ -211,10 +211,45 @@ if [ "$_age_sec" -lt "$_stale_sec" ]; then
     exit "$EXIT_OK"
 fi
 
+# Return true only for arguments that launch the TUI.
+#
+# Herdr accepts global options before an optional command. A command such as
+# `herdr --machine host agent list` is not a TUI, even when the first argument
+# is an option. Consume the options and their values, then reject any remaining
+# positional token.
+_is_tui_command() {
+    set -f
+    set -- $1
+    set +f
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --session|--machine|--remote|--remote-keybindings)
+                if [ $# -lt 2 ]; then
+                    return 1
+                fi
+                shift 2
+                ;;
+            --session=*|--machine=*|--remote=*|--remote-keybindings=*)
+                shift
+                ;;
+            --handoff)
+                shift
+                ;;
+            --help|-h|--version|-V|--default-config|--skill)
+                return 1
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    done
+    return 0
+}
+
 # Find the TUI client only. The match is on the program name, not a substring
 # of the whole command line: `herdr-core connect`, an SSH control master, and a
 # Node helper all carry "herdr" in their arguments and none of them is the
-# client. The local server and this watchdog are skipped for the same reason.
+# client. The local server, API commands, and this watchdog are skipped too.
 PIDS=""
 for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
     _comm="$(ps -o comm= -p "$_pid" 2>/dev/null)"
@@ -228,18 +263,9 @@ for _pid in $(pgrep -f 'herdr' 2>/dev/null); do
     fi
     _rest="${_cmd#"$_comm"}"
     _rest="${_rest#"${_rest%%[! ]*}"}"
-    if [ -n "$_rest" ]; then
-        _first="${_rest%% *}"
-        case "$_first" in
-            -h|--help|-V|--version) continue ;;
-            -*) : ;;
-            *) continue ;;
-        esac
+    if ! _is_tui_command "$_rest"; then
+        continue
     fi
-    case "$_cmd" in
-        *"remote-client-bridge"*) continue ;;
-        *"watchdog-macos.sh"*) continue ;;
-    esac
     PIDS="$PIDS $_pid"
 done
 PIDS="${PIDS# }"

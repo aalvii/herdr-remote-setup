@@ -94,8 +94,11 @@ def key_present(text, blob):
                        for prefix in KEY_PREFIXES):
                 continue
             parsed = parse_key(parts[index] + " " + parts[index + 1])
-            if parsed is not None and parsed[1] == blob:
+            if parsed is None:
+                break
+            if parsed[1] == blob:
                 return True
+            break
     return False
 
 
